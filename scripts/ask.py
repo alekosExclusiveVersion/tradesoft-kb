@@ -8,32 +8,13 @@
 """
 import argparse
 import os
-import sqlite3
 import sys
 
-from search import PRODUCTS, ask_product, clean_content, search
+from search import PRODUCTS, ask_product, clean_content, load_chunks, search
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KB_ROOT = os.path.dirname(SCRIPT_DIR)
 DB_PATH = os.path.join(KB_ROOT, "cache", "kb_index.db")
-
-
-def load_chunks(product, page, max_chars):
-    db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    rows = db.execute(
-        "SELECT chunk, content FROM pages "
-        "WHERE product=? AND page=? ORDER BY chunk",
-        (product, page),
-    ).fetchall()
-    db.close()
-    out = []
-    size = 0
-    for chunk, content in rows:
-        if size + len(content) > max_chars and out:
-            break
-        out.append(content)
-        size += len(content)
-    return "".join(out)
 
 
 def main():

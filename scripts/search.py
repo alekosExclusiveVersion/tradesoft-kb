@@ -207,6 +207,26 @@ def clean_content(text):
     return t.strip()
 
 
+def load_chunks(product, page, max_chars=None):
+    """Полный текст страницы по ключу (product, page), чанки по порядку."""
+    if not os.path.exists(DB_PATH):
+        sys.exit(f"Индекс не найден: {DB_PATH}. Запустите scripts/build_index.py")
+    db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    rows = db.execute(
+        "SELECT content FROM pages WHERE product=? AND page=? ORDER BY chunk",
+        (product, page),
+    ).fetchall()
+    db.close()
+    out = []
+    size = 0
+    for (content,) in rows:
+        if max_chars is not None and size + len(content) > max_chars and out:
+            break
+        out.append(content)
+        size += len(content)
+    return "".join(out)
+
+
 def search(terms, product=None, limit=5, snippets=True):
     if not os.path.exists(DB_PATH):
         sys.exit(f"Индекс не найден: {DB_PATH}. Запустите scripts/build_index.py")
