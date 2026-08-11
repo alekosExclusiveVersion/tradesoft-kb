@@ -1,0 +1,41 @@
+{
+  "updated_at": "2026-08-11T15:59:27+0300",
+  "products": {
+    "parts-intellect-guide": {
+      "display": "Руководство пользователя Parts.Intellect",
+      "source": "https://product-doc.tradesoft.ru/ai/ai/",
+      "version": "5.25",
+      "pages": 850,
+      "images": 5316,
+      "images_bytes": 43670160,
+      "alljs_hash": "55a1b0f456600d0517a99d1c49ca0d74be8e14cfb739aea2fd31c23643ae0dd2"
+    },
+    "parts-intellect-synch": {
+      "display": "Синхронизатор Parts.Intellect",
+      "source": "https://product-doc.tradesoft.ru/ai/synch/",
+      "version": "5.25",
+      "pages": 68,
+      "images": 156,
+      "images_bytes": 1849818,
+      "alljs_hash": "e952afecf4cac27ae1f4b0cfbe499c7837cc5d89204f266fc2dcbe6a7b20b351"
+    },
+    "parts-resource-guide": {
+      "display": "Руководство пользователя Parts.Resource",
+      "source": "https://product-doc.tradesoft.ru/ar/ar/",
+      "version": "6.74",
+      "pages": 854,
+      "images": 6236,
+      "images_bytes": 59912586,
+      "alljs_hash": "c5197bc4997377d335e24f5316ea00871f7c059a0b755c24563977663bbf4a24"
+    },
+    "parts-resource-rest-api": {
+      "display": "REST API Parts.Resource",
+      "source": "https://product-doc.tradesoft.ru/ar/rest_api/",
+      "version": "",
+      "pages": 162,
+      "images": 9,
+      "images_bytes": 105363,
+      "alljs_hash": "be53463208adc25b3f54a3227fbf9d5e7313b2b66f62ed11d5592a253d452676"
+    }
+  }
+}
