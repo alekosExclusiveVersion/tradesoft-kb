@@ -80,6 +80,8 @@ class MdParser(HTMLParser):
         self.li_level = 0
         self._base = ""
         self._in_article = 0
+        self._tbl_rows = None   # список строк таблицы, когда внутри <table>
+        self._tbl_row = None    # ячейки текущей строки
 
     # -- helpers --------------------------------------------------------------
     def _flush(self):
@@ -156,15 +158,18 @@ class MdParser(HTMLParser):
         if tag == "table":
             self._end_para()
             self._push("table")
+            self._tbl_rows = []
+            self._tbl_row = None
             return
 
         if tag == "tr":
-            self._flush()
+            self._end_para()
             self._push("tr")
+            self._tbl_row = []
             return
 
         if tag in ("td", "th"):
-            self._flush()
+            self._end_para()
             self._push(tag)
             return
 
@@ -262,19 +267,32 @@ class MdParser(HTMLParser):
             return
 
         if tag == "table":
-            self._end_para()
+            self._flush()
             self._pop("table")
+            if self._tbl_rows is not None:
+                tbl = self._format_table(self._tbl_rows)
+                self._tbl_rows = None
+                self._tbl_row = None
+                if tbl:
+                    self.out.append(tbl)
             return
 
         if tag == "tr":
             self._flush()
-            self._end_para()
             self._pop("tr")
+            if self._tbl_rows is not None and self._tbl_row is not None:
+                if any(c.strip() for c in self._tbl_row):
+                    self._tbl_rows.append(self._tbl_row)
+                self._tbl_row = None
             return
 
         if tag in ("td", "th"):
             self._flush()
             self._pop(tag)
+            if self._tbl_rows is not None and self._tbl_row is not None:
+                cell = " ".join(self.para)
+                self.para = []
+                self._tbl_row.append(cell)
             return
 
         if tag == "a":
@@ -321,6 +339,37 @@ class MdParser(HTMLParser):
 
     def set_base(self, base):
         self._base = base
+
+    @staticmethod
+    def _fmt_cell(c):
+        """Экранирует ячейку для GFM-таблицы."""
+        c = (c or "").replace("|", "\\|").replace("\n", " ").strip()
+        return c or "&nbsp;"
+
+    def _format_table(self, rows):
+        """Собирает GFM markdown-таблицу из строк-ячеек.
+
+        Первая строка — заголовок; строки с одной ячейкой (служебные
+        layout-таблицы) пропускаются.
+        """
+        rows = [r for r in rows if len(r) > 1]
+        if len(rows) < 1:
+            return ""
+        # отбросить layout-таблицы: меньше 2 строк или нет данных
+        nonempty = [r for r in rows if any(c.strip() for c in r)]
+        if len(nonempty) < 2:
+            return ""
+        col_count = max(len(r) for r in rows)
+        rows = [r + [""] * (col_count - len(r)) for r in rows]
+        header = rows[0]
+        body = rows[1:]
+        lines = ["| " + " | ".join(self._fmt_cell(c) for c in header) + " |",
+                 "| " + " | ".join(["---"] * col_count) + " |"]
+        for row in body:
+            if all(not c.strip() or c.strip() == "&nbsp;" for c in row):
+                continue
+            lines.append("| " + " | ".join(self._fmt_cell(c) for c in row) + " |")
+        return "\n".join(lines)
 
     def result(self):
         self._end_para()
