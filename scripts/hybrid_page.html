@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hybrid-поиск по базе знаний</title>
+<style>
+  :root {
+    --hyb: #7c3aed; --hyb-bg: #f5f3ff; --hyb-border: #ddd6fe;
+    --ink: #1f2937; --mut: #6b7280; --line: #e5e7eb; --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--ink); background: #f3f4f6;
+  }
+  header {
+    background: var(--card); border-bottom: 1px solid var(--line);
+    padding: 16px 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  }
+  h1 { font-size: 18px; margin: 0 16px 0 0; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  h1 .pill {
+    font-size: 11px; font-weight: 600; background: var(--hyb); color: #fff;
+    padding: 2px 9px; border-radius: 999px; letter-spacing: .03em;
+  }
+  .searchbox { display: flex; gap: 8px; flex: 1; min-width: 260px; }
+  .searchbox input {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
+    font-size: 14px; outline: none;
+  }
+  .searchbox input:focus { border-color: var(--hyb); box-shadow: 0 0 0 3px rgba(124,58,237,.12); }
+  select {
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: 14px;
+  }
+  button {
+    padding: 9px 18px; border: none; border-radius: 8px; background: var(--hyb); color: #fff;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.08); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
+    font-size: 12px; color: var(--mut); cursor: pointer;
+  }
+  .chip:hover { border-color: var(--hyb); color: var(--hyb); }
+  main { padding: 16px 24px; max-width: 980px; margin: 0 auto; }
+  #status { margin-bottom: 12px; color: var(--mut); font-size: 13px; min-height: 18px; }
+  .results { display: flex; flex-direction: column; gap: 10px; }
+  .row {
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--card);
+    cursor: pointer; transition: border-color .12s, box-shadow .12s;
+  }
+  .row:hover { border-color: var(--hyb); box-shadow: 0 0 0 3px rgba(124,58,237,.08); }
+  .row .top { display: flex; gap: 8px; align-items: baseline; }
+  .row .rank {
+    width: 22px; height: 22px; flex: 0 0 auto; border-radius: 6px; background: var(--hyb-bg);
+    color: var(--hyb); font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center;
+  }
+  .row .title { font-weight: 600; }
+  .row .pname { font-size: 11px; color: var(--mut); background: #f3f4f6; padding: 1px 6px; border-radius: 6px; margin-left: auto; }
+  .row .snip { margin: 7px 0 5px; color: #374151; font-size: 13px; }
+  .row .path { font-size: 11px; color: var(--mut); word-break: break-all; }
+  .empty, .err {
+    padding: 26px 14px; text-align: center; color: var(--mut); font-size: 13px;
+  }
+  .err { color: #dc2626; }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(17,24,39,.55);
+    display: none; align-items: flex-start; justify-content: center; z-index: 50; padding: 32px 16px;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: #fff; border-radius: 14px; max-width: 920px; width: 100%;
+    max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,.3);
+  }
+  .modal-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start;
+  }
+  .modal-head .ttl { font-weight: 600; font-size: 16px; }
+  .modal-head .sub { font-size: 12px; color: var(--mut); margin-top: 2px; word-break: break-all; }
+  .modal-close {
+    margin-left: auto; border: 1px solid var(--line); background: #fff; color: var(--mut);
+    border-radius: 8px; width: 28px; height: 28px; cursor: pointer; font-size: 15px; line-height: 1;
+    flex: 0 0 auto;
+  }
+  .modal-close:hover { border-color: var(--hyb); color: var(--hyb); }
+  .modal-body {
+    padding: 16px 22px; overflow-y: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  .modal-body p { margin: 0 0 10px; }
+  .modal-body h2, .modal-body h3 { margin: 18px 0 8px; line-height: 1.3; }
+  .modal-body h2 { font-size: 17px; color: #111827; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .modal-body h3 { font-size: 15px; color: #1f2937; }
+  .modal-body ul { margin: 6px 0 12px; padding-left: 22px; }
+  .modal-body li { margin: 3px 0; }
+  .modal-body li::marker { color: var(--hyb); }
+  .modal-body code { background: #f3f4f6; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; }
+  .modal-body strong { font-weight: 600; color: #111827; }
+  .modal-body hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+  .modal-body .read-also {
+    margin: 16px 0 6px; padding: 12px 16px; background: var(--hyb-bg);
+    border: 1px solid var(--hyb-border); border-radius: 10px;
+  }
+  .modal-body .ra-title { font-weight: 600; color: var(--hyb); font-size: 13px; margin-bottom: 6px; }
+  .modal-body ul.ra { margin: 0; }
+  .modal-body a.more { color: var(--hyb); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+  .modal-body a.more:hover { background: #ede9fe; border-radius: 4px; }
+  .modal-body img.shot {
+    display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 8px;
+    border: 1px solid var(--line); background: #fff;
+  }
+  .modal-body table {
+    border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 12.5px;
+  }
+  .modal-body th, .modal-body td {
+    border: 1px solid var(--line); padding: 6px 9px; text-align: left; vertical-align: top;
+  }
+  .modal-body th {
+    background: #f5f4ff; font-weight: 600; color: #111827;
+  }
+  .modal-body tbody tr:nth-child(even) td { background: #fafafa; }
+  .modal-body .modal-scroll-x { overflow-x: auto; }
+  .modal-foot { padding: 10px 18px; border-top: 1px solid var(--line); color: var(--mut); font-size: 12px; }
+  mark { background: #fde68a; padding: 0 2px; border-radius: 3px; }
+  footer { padding: 8px 24px 20px; color: var(--mut); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Поиск по базе знаний <span class="pill">Hybrid</span></h1>
+  <div class="searchbox">
+    <input id="q" type="text" placeholder="Введите вопрос…" autofocus>
+    <select id="top">
+      <option value="3">3</option>
+      <option value="5">5</option>
+      <option value="10" selected>10</option>
+      <option value="15">15</option>
+      <option value="20">20</option>
+    </select>
+    <button id="go">Найти</button>
+  </div>
+</header>
+<div class="chips" style="padding: 8px 24px 0; max-width:980px; margin:0 auto;">
+  <span class="chip" data-q="куда перечисляется выручка">выручка</span>
+  <span class="chip" data-q="как оформить возврат товара">возврат товара</span>
+  <span class="chip" data-q="nastrojka onlajn kassy">онлайн-касса</span>
+  <span class="chip" data-q="остатки на складе">остатки на складе</span>
+  <span class="chip" data-q="НДС эквайринг">НДС эквайринг</span>
+  <span class="chip" data-q="баланс клиента">баланс клиента</span>
+</div>
+
+<main>
+  <div id="status"></div>
+  <div class="results" id="results"></div>
+</main>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="ttl" id="m-title"></div>
+        <div class="sub" id="m-sub"></div>
+      </div>
+      <button class="modal-close" id="m-close" aria-label="Закрыть">&times;</button>
+    </div>
+    <div class="modal-body" id="m-body"></div>
+    <div class="modal-foot" id="m-foot"></div>
+  </div>
+</div>
+
+<footer>Hybrid-поиск: FTS5 + семантический (Typesense) через RRF · прод-индекс</footer>
+
+<script>
+const PRODUCTS = {
+  "parts-intellect-guide": "Parts.Intellect",
+  "parts-intellect-synch": "Синхронизатор",
+  "parts-resource-guide": "Parts.Resource",
+  "parts-resource-rest-api": "Parts.Resource — REST API"
+};
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function highlightDom(container, query) {
+  const terms = (query || "").toLowerCase().split(/[^\wа-яё]+/).filter(t => t.length > 2);
+  if (!terms.length) return;
+  const escRe = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const reTest = new RegExp("(" + terms.map(escRe).join("|") + ")", "i");
+  const re = new RegExp("(" + terms.map(escRe).join("|") + ")", "gi");
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) {
+    const n = walker.currentNode;
+    if (reTest.test(n.nodeValue)) textNodes.push(n);
+  }
+  for (const n of textNodes) {
+    const span = document.createElement("span");
+    span.innerHTML = n.nodeValue.replace(re, "<mark>$1</mark>");
+    n.parentNode.replaceChild(span, n);
+  }
+}
+
+function render(rows, query) {
+  const el = document.getElementById("results");
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty">Нет результатов</div>';
+    return;
+  }
+  el.innerHTML = rows.map(r =>
+    '<div class="row clickable" data-pp="' + esc(r.page) + '" data-product="' + esc(r.product) + '" data-path="' + esc(r.path) + '">' +
+      '<div class="top"><span class="rank">' + r.rank + '</span>' +
+        '<span class="title">' + esc(r.title) + '</span>' +
+        '<span class="pname">' + esc(PRODUCTS[r.product] || r.product) + '</span></div>' +
+      (r.snippet ? '<div class="snip">' + esc(r.snippet).replace(/\*\*(.+?)\*\*/g, "<mark>$1</mark>") + '</div>' : '') +
+      '<div class="path">' + esc(r.path) + '</div>' +
+    '</div>'
+  ).join("");
+  highlightDom(el, query);
+}
+
+function closeModal() {
+  document.getElementById("overlay").classList.remove("open");
+}
+
+async function openPage(title, product, page, path, query) {
+  const overlay = document.getElementById("overlay");
+  const body = document.getElementById("m-body");
+  window._pageProduct = product;
+  document.getElementById("m-title").textContent = title;
+  document.getElementById("m-sub").textContent =
+    (PRODUCTS[product] || product) + " · страница " + page + " · " + path;
+  document.getElementById("m-foot").textContent = "";
+  body.textContent = "Загрузка…";
+  overlay.classList.add("open");
+
+  try {
+    const resp = await fetch("/api/page?product=" + encodeURIComponent(product) +
+      "&page=" + encodeURIComponent(page));
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || "Ошибка API");
+    document.getElementById("m-foot").textContent =
+      data.chars.toLocaleString("ru") + " символов" +
+      (data.truncated ? " (обрезано)" : "");
+    body.innerHTML = data.content_html || "<p>Пустая страница</p>";
+    highlightDom(body, query);
+  } catch (e) {
+    body.textContent = "Ошибка: " + e.message;
+  }
+}
+
+document.getElementById("results").addEventListener("click", ev => {
+  const row = ev.target.closest(".row.clickable");
+  if (!row) return;
+  const q = document.getElementById("q").value.trim();
+  openPage(
+    row.querySelector(".title").textContent,
+    row.dataset.product,
+    row.dataset.pp,
+    row.dataset.path,
+    q
+  );
+});
+document.getElementById("m-close").addEventListener("click", closeModal);
+document.getElementById("overlay").addEventListener("click", ev => {
+  const a = ev.target.closest("a.more");
+  if (a) {
+    ev.preventDefault();
+    const qtext = a.dataset.more || "";
+    if (!qtext) return;
+    document.getElementById("q").value = qtext;
+    closeModal();
+    setTimeout(run, 0);
+    return;
+  }
+  if (ev.target === ev.currentTarget) closeModal();
+});
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape" && document.getElementById("overlay").classList.contains("open")) {
+    closeModal();
+  }
+});
+
+async function run() {
+  const q = document.getElementById("q").value.trim();
+  if (!q) return;
+  const top = document.getElementById("top").value;
+  const status = document.getElementById("status");
+  status.textContent = "Поиск «" + q + "»…";
+  history.replaceState(null, "", "#" + new URLSearchParams({ q: q, top: top }).toString());
+
+  const url = "/api/hybrid?q=" + encodeURIComponent(q) + "&top=" + encodeURIComponent(top);
+
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || "Ошибка API");
+
+    render(data.hybrid.rows, q);
+
+    const svc = data.services;
+    const ts = svc.typesense ? "TS ✔" : "TS ✘";
+    const ol = svc.ollama ? "Ollama ✔" : "Ollama ✘";
+    status.textContent = "«" + q + "» — " + data.hybrid.rows.length + " результатов · " +
+      Math.round(data.elapsed_ms_total) + " мс · " + ts + " " + ol;
+  } catch (e) {
+    status.textContent = "Ошибка: " + e.message;
+  }
+}
+
+document.getElementById("go").addEventListener("click", run);
+document.getElementById("q").addEventListener("keydown", e => {
+  if (e.key === "Enter") run();
+});
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.getElementById("q").value = chip.dataset.q;
+    run();
+  });
+});
+
+function loadState() {
+  const hash = location.hash.replace(/^#/, "");
+  if (!hash) return;
+  const p = new URLSearchParams(hash);
+  const q = p.get("q");
+  if (!q) return;
+  document.getElementById("q").value = q;
+  if (p.get("top")) document.getElementById("top").value = p.get("top");
+  run();
+}
+
+loadState();
+</script>
+</body>
+</html>
