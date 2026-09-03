@@ -176,7 +176,8 @@ const PRODUCTS = {
   "parts-intellect-guide": "Parts.Intellect",
   "parts-intellect-synch": "Синхронизатор",
   "parts-resource-guide": "Parts.Resource",
-  "parts-resource-rest-api": "Parts.Resource — REST API"
+  "parts-resource-rest-api": "Parts.Resource — REST API",
+  "service-api": "Tradesoft service API"
 };
 
 function esc(s) {
@@ -268,6 +269,17 @@ document.getElementById("overlay").addEventListener("click", ev => {
   const a = ev.target.closest("a.more");
   if (a) {
     ev.preventDefault();
+    // Ссылка «Читайте также» на другой раздел документации: открыть страницу напрямую.
+    if (a.dataset.page && a.dataset.product) {
+      openPage(
+        a.dataset.title || a.textContent,
+        a.dataset.product,
+        a.dataset.page,
+        a.dataset.path || "",
+        document.getElementById("q").value
+      );
+      return;
+    }
     const qtext = a.dataset.more || "";
     if (!qtext) return;
     document.getElementById("q").value = qtext;

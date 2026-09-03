@@ -1,0 +1,307 @@
+{
+  "note": "Эталонный набор запросов для оценки точности поиска. expected — список ключей (product__page) корректных ответов (любой из списка считается попаданием). ip/p2p не задаются — запрос идёт по всем продуктам, как на /hybrid. Включает целевые запросы по новым продуктам (диадок, маркетплейс, версии, график поставок, ТСД, wazzup).",
+  "queries": [
+    {
+      "q": "подключить нового поставщика",
+      "expected": [
+        "parts-intellect-guide__dobavlenie_veb_postavshchika.htm.md",
+        "parts-resource-guide__podklyucheniya_postavshchika.htm.md",
+        "parts-intellect-guide__master_podklyucheniya_veb_postavshchika.htm.md",
+        "parts-resource-guide__podklyuchenie_veb_postavshchika.htm.md",
+        "parts-resource-guide__veb_postavshchiki.htm.md"
+      ]
+    },
+    {
+      "q": "подключить веб-поставщика",
+      "expected": [
+        "parts-resource-guide__podklyuchenie_veb_postavshchika.htm.md",
+        "parts-intellect-guide__dobavlenie_veb_postavshchika.htm.md",
+        "parts-resource-guide__podklyucheniya_postavshchika.htm.md",
+        "parts-intellect-guide__master_podklyucheniya_veb_postavshchika.htm.md"
+      ]
+    },
+    {
+      "q": "как подключить веб-поставщика по api",
+      "expected": [
+        "service-api__provider__provider_get-provider-list.htm.md",
+        "service-api__0__obzor_i_podklyuchenie.htm.md",
+        "parts-resource-rest-api__3_21__api_postavshchiki.htm.md",
+        "service-api__1__provider_service.htm.md"
+      ]
+    },
+    {
+      "q": "как оформить возврат товара",
+      "expected": [
+        "parts-intellect-guide__vozvrat_klienta_master_sozdaniya_prodazhi.htm.md",
+        "parts-intellect-guide__vozvraty_ot_klientov.htm.md"
+      ]
+    },
+    {
+      "q": "куда перечисляется выручка",
+      "expected": [
+        "parts-intellect-guide__dvizhenie_deneg.htm.md",
+        "parts-intellect-guide__skolko_zarabotano_za_den.htm.md",
+        "parts-intellect-guide__rentabelnost___vyruchka_i_marzha.htm.md",
+        "parts-intellect-guide__dokhody___vkhodyashchie_platezhi.htm.md"
+      ]
+    },
+    {
+      "q": "nastrojka onlajn kassy",
+      "expected": [
+        "parts-resource-guide__nastrojka_onlajn_kassy.htm.md",
+        "parts-resource-guide__onlajn_kassy.htm.md",
+        "parts-resource-guide__rabota_s_onlajn_kassoj.htm.md"
+      ]
+    },
+    {
+      "q": "остатки на складе",
+      "expected": [
+        "parts-intellect-guide__otchet_ob_ostatkakh.htm.md",
+        "parts-resource-guide__skladskie_ostatki.htm.md",
+        "parts-intellect-guide__rasshirennyj_otchet_ob_ostatkakh.htm.md"
+      ]
+    },
+    {
+      "q": "НДС эквайринг",
+      "expected": [
+        "parts-intellect-guide__stavki_nds.htm.md",
+        "parts-intellect-guide__logika_podbora_pravil_stavok_nds.htm.md"
+      ]
+    },
+    {
+      "q": "баланс клиента",
+      "expected": [
+        "parts-resource-guide__vkladka_balans_klienta.htm.md",
+        "parts-intellect-guide__balansy_kontragenta.htm.md",
+        "parts-resource-guide__balans.htm.md"
+      ]
+    },
+    {
+      "q": "ставка НДС онлайн касса",
+      "expected": [
+        "parts-intellect-guide__stavki_nds.htm.md",
+        "parts-resource-guide__nastrojka_onlajn_kassy.htm.md"
+      ]
+    },
+    {
+      "q": "создать клиента по api",
+      "expected": [
+        "parts-resource-rest-api__3_1_1__sozdanie_redaktirovanie_klienta.htm.md",
+        "parts-resource-rest-api__3_1__api_klienty.htm.md"
+      ]
+    },
+    {
+      "q": "загрузить остатки по api",
+      "expected": [
+        "parts-resource-rest-api__3_11_1__zagruzka_ostatkov.htm.md",
+        "parts-resource-rest-api__3_11__api_pozitsii_prajs_listov__ostatkov_.htm.md"
+      ]
+    },
+    {
+      "q": "получить список поставщиков service api",
+      "expected": [
+        "service-api__provider__provider_get-provider-list.htm.md",
+        "service-api__1__provider_service.htm.md"
+      ]
+    },
+    {
+      "q": "движение товара по поставщикам",
+      "expected": [
+        "parts-intellect-guide__dvizhenie_tovara_po_postavshchikam.htm.md",
+        "parts-intellect-guide__dvizhenie_tovara_po_postavshchikam_otchety_po_postavshchikam_otchety_v_sisteme.htm.md"
+      ]
+    },
+    {
+      "q": "выгрузка товаров на маркетплейс",
+      "expected": [
+        "parts-resource-guide__vygruzka_tovarov_na_marketplejs.htm.md",
+        "parts-resource-guide__vygruzka_tovarov_dlya_ozon.htm.md",
+        "parts-resource-guide__vygruzka_tovarov_dlya_yandeks_marketa.htm.md"
+      ]
+    },
+    {
+      "q": "добавить новый склад",
+      "expected": [
+        "parts-intellect-guide__dobavlenie_skladov_i_torgovykh_tochek.htm.md",
+        "parts-intellect-guide__dobavlenie_torgovoj_tochki_i_sklada.htm.md"
+      ]
+    },
+    {
+      "q": "импорт остатков из файла",
+      "expected": [
+        "parts-intellect-guide__import_ostatkov_iz_fajla.htm.md"
+      ]
+    },
+    {
+      "q": "провести инвентаризацию",
+      "expected": [
+        "parts-intellect-guide__provedenie_inventarizatsii.htm.md",
+        "parts-intellect-guide__inventarizatsiya_zadaniya_na_sklad.htm.md"
+      ]
+    },
+    {
+      "q": "установить сервер parts intellect",
+      "expected": [
+        "parts-intellect-guide__ustanovka_servera.htm.md",
+        "parts-intellect-guide__ustanovka_programmy_i_komponentov.htm.md"
+      ]
+    },
+    {
+      "q": "как активировать программу",
+      "expected": [
+        "parts-intellect-guide__aktivatsiya_programmy.htm.md",
+        "parts-intellect-guide__deaktivatsiya_programmy.htm.md"
+      ]
+    },
+    {
+      "q": "анализ продаж по товарам",
+      "expected": [
+        "parts-intellect-guide__avs_analiz_prodazh.htm.md",
+        "parts-intellect-guide__abc_analiz_prodazh.htm.md"
+      ]
+    },
+    {
+      "q": "заказ поставщику создать",
+      "expected": [
+        "parts-intellect-guide__zakaz_postavshchiku_master_sozdaniya_sklad_i_zakupki.htm.md",
+        "parts-intellect-guide__avtozakaz_postavshchiku.htm.md"
+      ]
+    },
+    {
+      "q": "получить прайс лист поставщика по api",
+      "expected": [
+        "service-api__provider__provider_get-price-list.htm.md",
+        "parts-resource-rest-api__3_10_2__poluchenie_informatsii_o_prajs_liste.htm.md"
+      ]
+    },
+    {
+      "q": "веб-проценка настройка",
+      "expected": [
+        "parts-resource-guide__veb_protsenka.htm.md",
+        "parts-intellect-guide__vkladka_protsenka.htm.md"
+      ]
+    },
+    {
+      "q": "автоимопрт заказов клиентов",
+      "expected": [
+        "parts-intellect-guide__avtoimport_zakazov_klientov.htm.md",
+        "parts-intellect-guide__nastrojka_avtoimporta_zakazov_klientov_s_pochty.htm.md"
+      ]
+    },
+    {
+      "q": "автоимпорт заказов",
+      "expected": [
+        "parts-intellect-guide__avtoimport_zakazov_klientov.htm.md",
+        "parts-intellect-guide__nastrojka_avtoimporta_zakazov_klientov_s_pochty.htm.md"
+      ]
+    },
+    {
+      "q": "как подключить поставщика в Parts.Resource",
+      "expected": [
+        "parts-resource-guide__podklyucheniya_postavshchika.htm.md",
+        "parts-resource-guide__veb_postavshchiki.htm.md"
+      ]
+    },
+    {
+      "q": "работа с остатками Интеллект",
+      "expected": [
+        "parts-intellect-guide__otchet_ob_ostatkakh_skladskie_otchety_otchety_v_sisteme.htm.md",
+        "parts-intellect-guide__vvedenie.htm.md"
+      ]
+    },
+    {
+      "q": "yfcnhjqrf jykfqy rfcss",
+      "expected": [
+        "parts-resource-guide__nastrojka_onlajn_kassy.htm.md",
+        "parts-resource-guide__onlajn_kassy.htm.md"
+      ]
+    },
+    {
+      "q": "настройка кассы",
+      "expected": [
+        "parts-resource-guide__nastrojka_onlajn_kassy.htm.md",
+        "parts-resource-guide__nastrojka_polzovatelej.htm.md",
+        "parts-intellect-guide__nastrojka_podklyucheniya_kkt.htm.md",
+        "parts-intellect-guide__dobavlenie_schetov_i_kass.htm.md",
+        "parts-intellect-guide__osobennosti_nastroek_podklyucheniya_onlajn_kass_s_peredachej_dannykh.htm.md"
+      ]
+    },
+    {
+      "q": "как настроить обмен документами через диадок",
+      "expected": [
+        "diadok__nastrojka_importa_iz_diadok.htm.md",
+        "diadok__nastrojka_ehksporta_v_diadok.htm.md",
+        "diadok__import_dokumentov_iz_diadok.htm.md",
+        "diadok__ehksport_dokumentov_v_diadok.htm.md"
+      ]
+    },
+    {
+      "q": "вывести из оборота коды маркировки через интеграцию с диадок",
+      "expected": [
+        "parts-intellect-changes__versiya_5_25.htm.md",
+        "diadok__nastrojki_kontragenta.htm.md"
+      ]
+    },
+    {
+      "q": "что нового в parts intellect версия 5.25",
+      "expected": [
+        "parts-intellect-changes__versiya_5_25.htm.md",
+        "parts-intellect-changes__versiya_5_24.htm.md"
+      ]
+    },
+    {
+      "q": "изменения parts resource версия 6.74",
+      "expected": [
+        "parts-resource-changes__versiya_6_74.htm.md",
+        "parts-resource-changes__versiya_6_73.htm.md"
+      ]
+    },
+    {
+      "q": "как выгрузить товары на ozon",
+      "expected": [
+        "marketplace__dobavlenie_tovarov_na_marketplejs_ozon.htm.md",
+        "marketplace__ozon.htm.md",
+        "marketplace__o_marketplejse_ozon.htm.md"
+      ]
+    },
+    {
+      "q": "настроить график поставок для клиентов",
+      "expected": [
+        "delivery_schedule__nastrojka_grafika_postavok.htm.md",
+        "delivery_schedule__nastrojka_grafikov_postavok_do_klientov.htm.md"
+      ]
+    },
+    {
+      "q": "можно ли настроить график поставок в Parts.Resource?",
+      "expected": [
+        "parts-resource-guide__nastrojka_obshchego_grafika_postavok.htm.md",
+        "parts-resource-guide__nastrojka_grafika_postavok.htm.md",
+        "parts-resource-guide__nastrojka_chastnogo_grafika_postavok.htm.md"
+      ]
+    },
+    {
+      "q": "работа с терминалом сбора данных тсд",
+      "expected": [
+        "tsd__rabota_s_tsd.htm.md",
+        "tsd__nastrojka_i_podklyuchenie_tsd.htm.md",
+        "tsd__trebovaniya_k_ustrojstvu_tsd_.htm.md"
+      ]
+    },
+    {
+      "q": "подключить wazzup в parts intellect",
+      "expected": [
+        "wazzup__podklyuchenie_servisa_v_parts_intellect.htm.md",
+        "wazzup__podklyuchenie_i_nastrojka_servisa.htm.md"
+      ]
+    },
+    {
+      "q": "подключить эквайринг на сайт",
+      "expected": [
+        "parts-resource-guide__nastrojka_sposobov_oplaty.htm.md",
+        "parts-resource-guide__priem_onlajn_platezhej.htm.md",
+        "parts-resource-guide__sposoby_oplaty.htm.md",
+        "parts-resource-guide__nastrojka_ikonok_platezhnykh_sistem.htm.md"
+      ]
+    }
+  ]
+}
