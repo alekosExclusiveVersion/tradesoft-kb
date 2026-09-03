@@ -5,3 +5,10 @@ __pycache__/
 *.pyc
 scripts/.venv/
 .DS_Store
+
+# Генерируемые отчёты (вывод evaluate.py и HTML-отчёты) — регенерируются скриптами
+REPORT.html
+REPORT_PROD.html
+scripts/eval_baseline.json
+scripts/eval_afterT2.json
+scripts/eval_final_hybrid.json
