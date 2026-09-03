@@ -302,6 +302,65 @@
         "parts-resource-guide__sposoby_oplaty.htm.md",
         "parts-resource-guide__nastrojka_ikonok_platezhnykh_sistem.htm.md"
       ]
+    },
+    {
+      "q": "настроить эквайринг на кассе",
+      "expected": [
+        "parts-intellect-guide__nastrojka_podklyucheniya_ehkvajringa.htm.md",
+        "parts-intellect-guide__sozdanie_oplaty_po_bankovskoj_karte.htm.md",
+        "parts-intellect-guide__dobavlenie_novogo_scheta_kassy.htm.md"
+      ]
+    },
+    {
+      "q": "диадок маркировка",
+      "expected": [
+        "diadok__nastrojka_ehksporta_v_diadok.htm.md",
+        "diadok__nastrojka_importa_iz_diadok.htm.md",
+        "diadok__nastrojki_kontragenta.htm.md",
+        "diadok__ehksport_dokumentov_v_diadok.htm.md"
+      ]
+    },
+    {
+      "q": "можно ли настроить график поставок?",
+      "expected": [
+        "delivery_schedule__nastrojka_grafika_postavok.htm.md",
+        "delivery_schedule__nastrojka_grafikov_postavok_do_klientov.htm.md",
+        "delivery_schedule__nastrojka_grafikov_postavok_mezhdu_torgovymi_tochkami.htm.md",
+        "delivery_schedule__nastrojka_grafikov_postavok_postavshchikov_v_torgovye_tochki.htm.md"
+      ]
+    },
+    {
+      "q": "как направить seo на сайте?",
+      "expected": [
+        "seo-guide__master_pervichnoj_nastrojki.htm.md",
+        "seo-guide__sbor_semanticheskogo_yadra_sajta.htm.md",
+        "seo-guide__vnutrennyaya_optimizatsiya.htm.md",
+        "parts-resource-guide__nastrojka_seo_parametrov.htm.md"
+      ]
+    },
+    {
+      "q": "как настроить seo на сайте?",
+      "expected": [
+        "parts-resource-guide__nastrojka_seo.htm.md",
+        "parts-resource-guide__nastrojka_seo_parametrov.htm.md",
+        "seo-guide__master_pervichnoj_nastrojki.htm.md"
+      ]
+    },
+    {
+      "q": "что нового в parts intellect про маркировку и честный знак",
+      "expected": [
+        "parts-intellect-changes__versiya_5_25.htm.md",
+        "parts-intellect-changes__versiya_5_24.htm.md"
+      ]
+    },
+    {
+      "q": "передаются ли коды маркировки из Parts.Intellect при продаже юрлиц через ЭДО и выводятся ли из оборота в Честном знаке",
+      "expected": [
+        "diadok__nastrojka_ehksporta_v_diadok.htm.md",
+        "diadok__nastrojki_kontragenta.htm.md",
+        "diadok__import_dokumentov_iz_diadok.htm.md",
+        "parts-intellect-changes__versiya_5_25.htm.md"
+      ]
     }
   ]
 }
