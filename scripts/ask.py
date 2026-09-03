@@ -10,7 +10,7 @@ import argparse
 import os
 import sys
 
-from search import PRODUCTS, ask_product, clean_content, load_chunks, search
+from search import PRODUCTS, ask_product, clean_content, load_chunks, search, search_hybrid
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KB_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -26,6 +26,8 @@ def main():
     ap.add_argument("--max-chars", type=int, default=20000,
                     help="Максимум символов на страницу (по умолчанию 20000)")
     ap.add_argument("--no-sources", action="store_true", help="Без списка источников")
+    ap.add_argument("--mode", choices=["fts", "vector", "hybrid"], default="hybrid",
+                    help="Режим поиска (по умолчанию hybrid)")
     args = ap.parse_args()
 
     if not os.path.exists(DB_PATH):
@@ -39,7 +41,13 @@ def main():
     if product:
         print(f"Продукт: {PRODUCTS[product]}")
 
-    rows, elapsed = search(terms, product, args.top)
+    if args.mode == "hybrid":
+        rows, elapsed = search_hybrid(args.query, product, args.top)
+    elif args.mode == "vector":
+        from search import vector_main
+        rows, elapsed = vector_main(args.query, product, args.top)
+    else:
+        rows, elapsed = search(terms, product, args.top)
     if not rows:
         sys.exit("По введенным данным нет результатов.\n"
                  "Попробуйте изменить формулировку запроса или укажите продукт.")

@@ -17,11 +17,23 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KB_ROOT = os.path.dirname(SCRIPT_DIR)
 DB_PATH = os.path.join(KB_ROOT, "cache", "kb_index.db")
 
+RRF_K = 60
+RRF_TOP = 30
+RECALL_MIN = 2  # если строгий AND-поиск даёт меньше — подключаем OR-fallback для recall
+
 PRODUCTS = {
     "parts-intellect-guide": "Parts.Intellect",
     "parts-intellect-synch": "Синхронизатор",
     "parts-resource-guide": "Parts.Resource",
     "parts-resource-rest-api": "Parts.Resource — REST API",
+    "service-api": "Tradesoft service API",
+    "diadok": "Диадок",
+    "delivery_schedule": "График поставок",
+    "wazzup": "Wazzup",
+    "tsd": "ТСД",
+    "marketplace": "Маркетплейсы",
+    "parts-resource-changes": "Изменения Parts.Resource (версии)",
+    "parts-intellect-changes": "Изменения Parts.Intellect (версии)",
 }
 
 PRODUCT_MARKERS = {
@@ -31,7 +43,122 @@ PRODUCT_MARKERS = {
                              "поставщик", "клиентская часть", "каталог", "пополнение баланса"],
     "parts-intellect-guide": ["наша фирма", "склад", "приходная", "расходная", "торговая точка",
                               "эквайринг", "интеллект", "касс"],
+    "service-api": ["api", "веб-поставщик", "веб поставщик", "service", "tradesoft service",
+                    "endpoint", "getproviderlist", "getpricelist", "поставщик по api", "подключ"],
 }
+
+
+# Явные имена/клички продуктов в запросе. Более конкретные варианты идут раньше
+# (проверяются первыми). Сравнение — по подстроке в нижнем регистре; точки,
+# подчёркивания и дефисы нормализуются в пробел, чтобы «parts.resource» и
+# «parts resource» матчились одинаково.
+#
+# Блоки делятся на два класса приоритета:
+#   - PRODUCT_NAMES_SYSTEM — явные имена систем (Parts.Resource, Parts.Intellect,
+#     service api, …). Если в запросе названа система, она перекрывает любой
+#     тематический маркер продукта (detect_product_name ищет сначала здесь).
+#   - PRODUCT_NAMES_TOPIC — тематические/фичерные маркеры продуктов (график
+#     поставок, ТСД, маркетплейс, wazzup). Используются только если имя системы
+#     не найдено, чтобы «настроить график поставок» оставался delivery_schedule,
+#     а «…график поставок в Parts.Resource» уходил в parts-resource-guide.
+PRODUCT_NAMES_SYSTEM = [
+    (("изменения parts resource", "parts resource changes", "resource changes",
+      "что нового в parts resource", "версия 6", "ver.6", "версии 6", "версией 6"),
+     "parts-resource-changes"),
+    (("изменения parts intellect", "parts intellect changes", "intellect changes",
+      "что нового в parts intellect", "версия 5", "ver.5", "версии 5", "версией 5"),
+     "parts-intellect-changes"),
+    (("диадок", "сервис диадок", "скб контур", "контур",
+      "экспорт в диадок", "импорт из диадок", "эдо"),
+     "diadok"),
+    (("parts resource rest api", "resource rest api", "rest api ресурс"),
+     "parts-resource-rest-api"),
+    (("parts intellect sinc", "parts intellect sync", "интеллект синхронизатор",
+      "синхронизатор"),
+     "parts-intellect-synch"),
+    (("parts intellect", "parts.intellect", "parts intellect сервер",
+      "интеллект"),
+     "parts-intellect-guide"),
+    (("parts resource", "parts.resource", "ресурс", "resource"),
+     "parts-resource-guide"),
+    (("service api", "tradesoft service", "service", "сервис апи"),
+     "service-api"),
+]
+
+PRODUCT_NAMES_TOPIC = [
+    (("график поставок", "графики поставок", "плановая дата поставки",
+      "график поставки"),
+     "delivery_schedule"),
+    (("wazzup",), "wazzup"),
+    (("тсд", "терминал сбора данных"), "tsd"),
+    (("маркетплейс", "маркетплейсы", "маркет плейс", "маркетплейсов",
+      "ozon", "оzon", "яндекс маркет", "яндex", "авито", "дром", "onboxmarket"),
+     "marketplace"),
+]
+
+# Полный список — для обратной совместимости (если где-то перебирается
+# PRODUCT_NAMES целиком).
+PRODUCT_NAMES = PRODUCT_NAMES_SYSTEM + PRODUCT_NAMES_TOPIC
+
+
+def _name_key(query: str) -> str:
+    """Нормализует запрос для сопоставления с именами продуктов."""
+    import re as _re
+    q = query.lower()
+    q = _re.sub(r"[.\-_]", " ", q)
+    return _re.sub(r"\s+", " ", q).strip()
+
+
+def detect_product_name(query: str):
+    """Явное имя продукта в запросе → ключ продукта, или None.
+
+    В отличие от detect_products (маркеры-темы), здесь распознаются именно
+    названия: «Parts.Resource», «Parts.Intellect», «Интеллект», «Ресурс»,
+    «Rest API» и т.п. Возвращает ОДИН продукт (самый приоритетный).
+
+    Сначала ищется явное имя системы (PRODUCT_NAMES_SYSTEM): если в запросе
+    назван продукт, он перекрывает любой тематический маркер. Тематические
+    маркеры (график поставок → delivery_schedule, ТСД, маркетплейс и т.п.,
+    PRODUCT_NAMES_TOPIC) учитываются только если имя системы не найдено.
+    Так «можно ли настроить график поставок в Parts.Resource?» направляется
+    в parts-resource-guide, а «настроить график поставок для клиентов» —
+    в delivery_schedule.
+    """
+    q = _name_key(query)
+    for names in (PRODUCT_NAMES_SYSTEM, PRODUCT_NAMES_TOPIC):
+        for product_names, product in names:
+            for name in product_names:
+                if name in q:
+                    return product
+    return None
+
+
+# Точечный паттерн «оплата/эквайринг на сайте»: для интернет-магазина Parts.Resource.
+# Срабатывает ТОЛЬКО когда в запросе намешаны оплата+сайт и нет POS/офисных маркеров
+# (касса, торговый терминал и т.п.). Нужен, т.к. «эквайринг» сам по себе — индикатор
+# Parts.Intellect (POS), а «на сайте» переводит тему в способы оплаты Parts.Resource.
+_WEBSITE_TERMS = ("сайт", "интернет-магазин", "интернет магазин", "онлайн-магазин",
+                  "веб-витрина", "интернет магазина")
+_PAYMENT_TERMS = ("эквайринг", "эквайринга", "оплат", "платеж", "платёж")
+_POS_COUNTER_SIGNALS = ("касс", "розничн", "торговой", "торговая точка", "терминал",
+                        " pos", "офис")
+
+
+def web_payment_product(query):
+    """parts-resource-guide, если запрос — про оплату/эквайринг на сайте, иначе None.
+
+    Узкий паттерн: (оплата И сайт) И никаких POS/офисных признаков. Не затрагивает
+    ни api/поставщик-запросы, ни «эквайринг на кассе».
+    """
+    if not query:
+        return None
+    q = query.lower()
+    has_pay = any(t in q for t in _PAYMENT_TERMS)
+    has_web = any(t in q for t in _WEBSITE_TERMS)
+    has_pos = any(t in q for t in _POS_COUNTER_SIGNALS)
+    if has_pay and has_web and not has_pos:
+        return "parts-resource-guide"
+    return None
 
 
 def detect_products(query):
@@ -47,6 +174,42 @@ def detect_products(query):
         if n:
             scores[product] = n
     return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+
+
+# Минимальное число маркеров, чтобы считать продукт «подтверждённым» по
+# контексту запроса (без явного имени). 2 маркера — уже сильный сигнал,
+# например «поставщик»+«веб» для parts-resource-guide.
+CONTEXT_PRODUCT_MIN_SCORE = 2
+
+
+def infer_product_context(query, forced_product=None):
+    """Определяет продукт по явному имени ИЛИ по маркерам-контексту (fallback).
+
+    - Явное имя из PRODUCT_NAMES («Parts.Resource», «Интеллект», «service api»)
+      — наивысший приоритет.
+    - Если имя не найдено, но маркеры (detect_products) явно указывают на один
+      продукт (сильный перевес), возвращаем его — например «как подключить
+      поставщика» → parts-resource-guide по маркерам «поставщик»/«веб».
+    - В противном случае — None (поиск по всем продуктам).
+
+    Возвращает ключ продукта или None.
+    """
+    if forced_product is not None:
+        return forced_product if forced_product in PRODUCTS else None
+    explicit = detect_product_name(query)
+    if explicit:
+        return explicit
+    det = detect_products(query)
+    if not det:
+        return None
+    top_product, top_score = det[0]
+    # Более конкретные маркеры в остальных продуктах не должны перебивать.
+    # Требуем уверенного лидера: максимальный счёт ≥ порога и отсутствие
+    # близкого конкурента (разрыв > 0, чтобы не угадывать при ничьей).
+    if top_score >= CONTEXT_PRODUCT_MIN_SCORE and \
+            (len(det) == 1 or det[1][1] < top_score):
+        return top_product
+    return None
 
 
 def ask_product(query, forced_product=None, auto=False):
@@ -134,15 +297,20 @@ TOKEN_RE = re.compile(r"[\wа-яё]+", re.I)
 
 
 def normalize_terms(terms):
-    """Убирает стоп-слова и разбивает дефисные слова («прайс-листов» → «прайс», «листов»)."""
+    """Убирает стоп-слова, разбивает дефисные слова («прайс-листов» → «прайс», «листов»)
+    и приводит к морфологическому корню («выгрузку/выгрузки» → «выгрузк»)."""
+    from stem import stem_word
     out = []
     for t in terms:
         t = t.strip().strip('"').lower()
         if t in STOPWORDS or len(t) < 2:
             continue
         for part in t.replace("-", " ").split():
-            if part not in STOPWORDS and len(part) >= 2 and part not in out:
-                out.append(part)
+            if part in STOPWORDS or len(part) < 2:
+                continue
+            s = stem_word(part)
+            if s and s not in out:
+                out.append(s)
     return out
 
 
@@ -227,51 +395,79 @@ def load_chunks(product, page, max_chars=None):
     return "".join(out)
 
 
+def _score_row(r, terms, require_all):
+    """Скорит один FTS-чанк. require_all=True — нужны ВСЕ термины; иначе — частичное
+    совпадение (напр. минимум 2), чтобы поднять recall. Возвращает None, если
+    чанк не подходит под условие."""
+    _, page, title, _, _, score, content = r
+    words = word_positions(title) + word_positions(content)
+    first = {}
+    matched = 0
+    for t in terms:
+        hits = [i for i, w in enumerate(words) if w.startswith(t)]
+        if not hits:
+            if require_all:
+                return None
+            continue
+        first[t] = min(hits)
+        matched += 1
+    if not require_all and matched < RECALL_MIN:
+        return None
+    if first:
+        span = max(first.values()) - min(first.values())
+    else:
+        span = 10 ** 6
+    title_hits = sum(
+        1 for t in terms if any(w.startswith(t) for w in word_positions(title))
+    )
+    ph = phrase_hits(words, terms)
+    return (-matched, -ph, -title_hits, score, span)
+
+
 def search(terms, product=None, limit=5, snippets=True):
     if not os.path.exists(DB_PATH):
         sys.exit(f"Индекс не найден: {DB_PATH}. Запустите scripts/build_index.py")
     db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
 
     t0 = time.perf_counter()
-    terms = normalize_terms(terms)
+    terms = _correct_terms(normalize_terms(terms))
     if not terms:
         db.close()
         return [], 0.0
 
     cond = " AND product=?" if product else ""
     args_extra = [product] if product else []
-    q = fts_query(terms, "AND")
-    sql = (
-        "SELECT product, page, title, path, snippet(chunks_fts, 1, '⟦', '⟧', '…', 24), "
-        "bm25(chunks_fts), content FROM chunks_fts WHERE chunks_fts MATCH ?"
-        + cond
-        + " ORDER BY rank LIMIT 500"
-    )
 
-    ranked = []
-    for r in db.execute(sql, [q] + args_extra).fetchall():
-        product_r, page, title, path, snip, score, content = r
-        words = word_positions(title) + word_positions(content)
-        first = {}
-        ok = True
-        for t in terms:
-            hits = [i for i, w in enumerate(words) if w.startswith(t)]
-            if not hits:
-                ok = False
-                break
-            first[t] = min(hits)
-        if not ok:
-            continue
-        span = max(first.values()) - min(first.values())
-        if span > PROXIMITY_WINDOW:
-            continue
-        title_hits = sum(
-            1 for t in terms if any(w.startswith(t) for w in word_positions(title))
+    def fetch(q):
+        sql = (
+            "SELECT product, page, title, path, snippet(chunks_fts, 1, '⟦', '⟧', '…', 24), "
+            "bm25(chunks_fts), content FROM chunks_fts WHERE chunks_fts MATCH ?"
+            + cond
+            + " ORDER BY rank LIMIT 500"
         )
-        ph = phrase_hits(words, terms)
-        ranked.append((-ph, -title_hits, score, span, r[:6]))
-    ranked.sort(key=lambda k: k[:4])
-    rows = [k[4] for k in ranked[:limit]]
+        return db.execute(sql, [q] + args_extra).fetchall()
+
+    # Tier-2 (recall): сначала строгий AND (все термины), затем, если результатов
+    # мало, дополняем частичными совпадениями через OR — повышает recall там, где
+    # ни одна страница не содержит все термины сразу (напр. «куда перечисляется выручка»).
+    ranked = []
+    raw_all = fetch(fts_query(terms, "AND"))
+    for r in raw_all:
+        rk = _score_row(r, terms, require_all=True)
+        if rk is not None:
+            ranked.append(rk + (r[:6],))
+
+    if len(ranked) < RECALL_MIN:
+        seen = {(x[5][0], x[5][1]) for x in ranked}
+        raw_or = fetch(fts_query(terms, "OR"))
+        for r in raw_or:
+            rk = _score_row(r, terms, require_all=False)
+            if rk is None or (r[0], r[1]) in seen:
+                continue
+            ranked.append(rk + (r[:6],))
+
+    ranked.sort(key=lambda k: k[:5])
+    rows = [k[5] for k in ranked[:limit]]
     elapsed = (time.perf_counter() - t0) * 1000
     db.close()
 
@@ -302,6 +498,534 @@ def fallback_like(terms, product, limit):
     return rows
 
 
+RARE_DF_THRESHOLD = 100  # термин с числом чанков ≤ порога считаем кандидатом в дискриминатор
+DISCRIMINATOR_COVERAGE = 0.5  # дискриминатор — термин, встречающийся в < 50% кандидатов
+DFS_CACHE = {}
+
+# Ultra-common stems — DF > 1500, не являются стоп-словами, но настолько
+# частые, что не могут различать страницы (товар, клиент, заказ…). Исключаем
+# из дискриминаторов и снижаем вес в векторном бусте.
+ULTRA_COMMON_DF = 1500
+
+
+def _build_ultra_common():
+    """Вычисляет множество ultra-common стемов из лексикона (лениво)."""
+    try:
+        import pickle
+        lex_path = os.path.join(os.path.dirname(__file__),
+                                "..", "cache", "stem_lexicon.pkl")
+        lex = pickle.load(open(lex_path, "rb"))
+        lex.pop("_mtime", None)
+        return frozenset(s for s, df in lex.items()
+                         if df > ULTRA_COMMON_DF and s not in STOPWORDS)
+    except Exception:
+        return frozenset()
+
+
+ULTRA_COMMON = _build_ultra_common()
+
+
+def _term_doc_frequency(stem, db=None):
+    """Сколько чанков содержит термин (префиксный матч). Кэшируется."""
+    if stem in DFS_CACHE:
+        return DFS_CACHE[stem]
+    df = 0
+    try:
+        if db is None:
+            db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            close = True
+        else:
+            close = False
+        row = db.execute(
+            "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH ?",
+            (f'"{stem}"*',)).fetchone()
+        df = row[0] if row else 0
+        if close:
+            db.close()
+    except Exception:
+        df = 0
+    DFS_CACHE[stem] = df
+    return df
+
+
+def _discriminators(terms, candidate_keys):
+    """Термины запроса, которые действительно «различают» релевантные страницы.
+
+    Дискриминатор — редкий термин (мало чанков), при этом встречающийся лишь
+    в меньшинстве страниц-кандидатов. Если же редкий термин есть почти у всех
+    кандидатов (например «выгрузк» в запросе про выгрузку) — это тема запроса,
+    а не отличительный признак, и его не берём.
+    """
+    if not candidate_keys:
+        return []
+    try:
+        db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        out = []
+        for t in terms:
+            if t in ULTRA_COMMON:
+                continue
+            df = _term_doc_frequency(t, db)
+            if df > RARE_DF_THRESHOLD or df == 0:
+                continue
+            hit = sum(1 for (p, pg) in candidate_keys
+                      if _page_has_terms(p, pg, [t]))
+            coverage = hit / len(candidate_keys)
+            if coverage < DISCRIMINATOR_COVERAGE:
+                out.append(t)
+        db.close()
+    except Exception:
+        out = [t for t in terms
+               if t not in ULTRA_COMMON and 0 < _term_doc_frequency(t) <= RARE_DF_THRESHOLD]
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Терпимость к опечаткам: лексикон стемов + замена df=0-термина на ближайший.
+# ---------------------------------------------------------------------------
+_LEXICON = None
+_LEX_CACHE_PATH = os.path.join(KB_ROOT, "cache", "stem_lexicon.pkl")
+_TYPO_MAX_DIST = 2
+
+
+def _load_lexicon():
+    """Частотный словарь стемов (stem -> число вхождений) по всем чанкам.
+
+    Строится один раз из страниц индекса и кэшируется в pickle (быстрый старт
+    сервера/повторных запусков). Кэш инвалидируется по mtime DB.
+    """
+    global _LEXICON
+    if _LEXICON is not None:
+        return _LEXICON
+    try:
+        import pickle
+        db_mtime = os.path.getmtime(DB_PATH) if os.path.exists(DB_PATH) else 0
+        if os.path.exists(_LEX_CACHE_PATH):
+            with open(_LEX_CACHE_PATH, "rb") as f:
+                saved = pickle.load(f)
+            if isinstance(saved, dict) and saved.get("_mtime") == db_mtime:
+                _LEXICON = saved
+                return _LEXICON
+    except Exception:
+        pass
+
+    from stem import stem_text
+    lex = {}
+    try:
+        db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        for (content,) in db.execute("SELECT content FROM pages"):
+            for s in stem_text(content or ""):
+                if s:
+                    lex[s] = lex.get(s, 0) + 1
+        db.close()
+    except Exception:
+        lex = {}
+    lex["_mtime"] = os.path.getmtime(DB_PATH) if os.path.exists(DB_PATH) else 0
+    try:
+        import pickle
+        os.makedirs(os.path.dirname(_LEX_CACHE_PATH), exist_ok=True)
+        with open(_LEX_CACHE_PATH, "wb") as f:
+            pickle.dump(lex, f)
+    except Exception:
+        pass
+    _LEXICON = lex
+    return lex
+
+
+def _lev(a, b):
+    m, n = len(a), len(b)
+    if n < m:
+        a, b = b, a
+        m, n = n, m
+    prev = list(range(m + 1))
+    for i, ch in enumerate(b):
+        cur = [i + 1]
+        for j in range(m):
+            cur.append(min(cur[-1] + 1, prev[j + 1] + 1, prev[j] + (ch != a[j])))
+        prev = cur
+    return prev[m]
+
+
+def _closest_stem(word):
+    """Ближайший известный стем к `word` (edit-distance) или None."""
+    lex = _load_lexicon()
+    if not word or len(word) < 4:
+        return None
+    # Кандидаты: та же 1-я буква и длина в пределах ±_TYPO_MAX_DIST — дешёвый фильтр.
+    candidates = []
+    for s in lex:
+        if s == "_mtime":
+            continue
+        if s[0] == word[0] and abs(len(s) - len(word)) <= _TYPO_MAX_DIST:
+            candidates.append(s)
+    if not candidates:
+        return None
+    best = min(candidates, key=lambda s: (_lev(word, s), -lex[s]))
+    if _lev(word, best) <= _TYPO_MAX_DIST:
+        return best
+    return None
+
+
+def _correct_terms(norm_terms):
+    """Заменяет непонятные (df=0) стемы запроса на ближайшие известные."""
+    out = []
+    for t in norm_terms:
+        if _term_doc_frequency(t) > 0 or len(t) < 4:
+            out.append(t)
+            continue
+        fix = _closest_stem(t)
+        out.append(fix if fix else t)
+    return out
+
+
+def _canonical_query(query):
+    """Запрос для векторной ноги: нижний регистр + исправление опечаток слов.
+
+    FTS-нога уже нормализует регистр (стеминг) и правит опечатки (лексикон),
+    а вот embed получал сырую строку — из-за чего регистр и опечатки искажали
+    векторные соседи и, как следствие, гибридный порядок. Здесь приводим текст
+    к нижнему регистру и заменяем слова с df=0 на ближайшие известные
+    («автоимопрт» -> «автоимпорт»), оставляя валидные и латинские токены
+    (транслит) нетронутыми. Возвращает (canonical_text, использована_ли_коррекция).
+    """
+    if not query or not query.strip():
+        return query, False
+    out, changed = [], False
+    for tok in query.split():
+        low = tok.lower()
+        has_cyr = any('\u0400' <= c <= '\u04FF' for c in low)
+        if not has_cyr or _term_doc_frequency(low) > 0 or len(low) < 4:
+            out.append(low if has_cyr else tok)
+            continue
+        fix = _closest_stem(low)
+        if fix and fix != low:
+            out.append(fix)
+            changed = True
+        else:
+            out.append(low)
+    canonical = " ".join(out)
+    return canonical, changed
+
+
+_PAGE_CONTENT_CACHE = {}
+
+
+def _page_content(product, page):
+    """Весь текст страницы (все чанки) из SQLite. Кэшируется."""
+    key = (product, page)
+    if key in _PAGE_CONTENT_CACHE:
+        return _PAGE_CONTENT_CACHE[key]
+    text = ""
+    try:
+        db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        rows = db.execute(
+            "SELECT content FROM pages WHERE product=? AND page=? ORDER BY chunk",
+            (product, page)).fetchall()
+        db.close()
+        text = "\n".join(r[0] or "" for r in rows)
+    except Exception:
+        text = ""
+    _PAGE_CONTENT_CACHE[key] = text
+    return text
+
+
+_PAGE_STEMS_CACHE = {}
+
+def _page_stems(product, page):
+    """Стеммированные слова страницы (все чанки). Кэшируется."""
+    key = (product, page)
+    if key in _PAGE_STEMS_CACHE:
+        return _PAGE_STEMS_CACHE[key]
+    from stem import stem_text
+    stems = set()
+    for p in stem_text(_page_content(product, page)):
+        if p:
+            stems.add(p)
+    _PAGE_STEMS_CACHE[key] = stems
+    return stems
+
+def _page_has_terms(product, page, stems):
+    """Содержит ли текст страницы любой из дискриминативных терминов.
+
+    Сравниваем пословно стемы текста со стемами терминов (равенство или
+    префикс-соответствие), а не точную подстроку в сыром тексте — так русская
+    морфология («подключить»/«подключённых») корректно матчится.
+    """
+    if not stems:
+        return False
+    page_stems = _page_stems(product, page)
+    if not page_stems:
+        return False
+    for term in stems:
+        if any(w == term or w.startswith(term) or term.startswith(w)
+               for w in page_stems):
+            return True
+    return False
+
+
+_SNIPPET_MAX = 320
+
+
+def smart_snippet(product, page, stems, max_len=_SNIPPET_MAX):
+    """Связный сниппет по полному тексту страницы.
+
+    FTS5 snippet() для совпадений в середине большого документа возвращает
+    фрагмент, начинающийся с '…' посреди фразы (обрыв контекста). Здесь мы
+    строим сниппет по абзацам: выбираем первый абзац с наибольшим покрытием
+    терминов, якоря на границу абзаца и подсвечиваем термины маркерами ⟦⟧
+    (clean_snippet потом превращает их в жирный).
+    """
+    from stem import stem_word
+    content = _page_content(product, page)
+    if not content or not stems:
+        return ""
+    paragraphs = [ln.strip() for ln in content.splitlines() if ln.strip()]
+    if not paragraphs:
+        return ""
+
+    def paragraph_score(p):
+        words = [w.lower() for w in TOKEN_RE.findall(p)]
+        if not words:
+            return 0, 0
+        matched = set()
+        for w in words:
+            ww = stem_word(w)
+            if not ww:
+                continue
+            for t in stems:
+                if t in matched:
+                    continue
+                if ww == t or ww.startswith(t) or t.startswith(ww):
+                    matched.add(t)
+        covered = len(matched)
+        return covered, covered - max(0, len(p) - max_len) / 200.0
+
+    best_p, best_score, best_text = None, (-1, -1), ""
+    for p in paragraphs:
+        score = paragraph_score(p)
+        # предпочитаем абзац с максимальным покрытием; при равенстве — более ранний
+        if score[0] > best_score[0] or (
+            score[0] == best_score[0] and score[1] > best_score[1]):
+            best_score = score
+            best_p = p
+    if best_p is None:
+        return ""
+    best_text = best_p
+    if len(best_text) > max_len:
+        best_text = best_text[:max_len].rstrip() + "…"
+    # подсветка терминов маркерами (как в clean_snippet, который переводит их в <b>)
+    for t in stems:
+        pattern = re.compile(r"(?<!\w)" + re.escape(t) + r"\w*", re.I)
+        best_text = pattern.sub(lambda m: _HL_OPEN + m.group(0) + _HL_CLOSE,
+                                best_text)
+    return best_text
+
+
+def _layout_variant(query: str):
+    """Кириллический вариант запроса, если он набран в неверной раскладке."""
+    try:
+        from layout import detect_and_fix_layout
+        fixed = detect_and_fix_layout(query)
+        return fixed if fixed and fixed != query else None
+    except Exception:
+        return None
+
+
+def _result_coverage(query, rows):
+    """Какая доля топ-3 результатов содержит хотя бы один стем запроса.
+
+    Считается по стемам страниц (`_page_has_terms`). Непустой, но «шумный»
+    результат (векторные совпадения без совпадения терминов) даёт низкое
+    покрытие — это признак неверной раскладки, а не релевантного ответа.
+    """
+    if not rows:
+        return 0.0
+    stems = _correct_terms(normalize_terms(terms(query)))
+    if not stems:
+        return 0.0
+
+    def key(r):
+        if isinstance(r, dict):
+            return (r.get("product"), r.get("page"))
+        return (r[0], r[1])
+
+    hit = sum(1 for r in rows[:3]
+              if _page_has_terms(key(r)[0], key(r)[1], stems))
+    return hit / min(3, len(rows[:3]))
+
+
+def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
+    """Гибридный поиск с распознаванием продукта и исправлением раскладки.
+
+    - Если в запросе явно назван продукт («Parts.Resource», «Интеллект» и пр.)
+      и product не задан — поиск ограничивается только этим продуктом.
+    - Раскладку исправляем как fallback: если основной поиск не нашёл ничего
+      ИЛИ дал результат плохого качества (мало терминов в топе), а запрос похож
+      на русский в латинской раскладке — повторяем поиск по восстановленной
+      кириллице и возвращаем его, если он заметно лучше. Легитимный латинский
+      транслит (например «nastrojka onlajn kassy») при этом не ломается, т.к.
+      кириллический вариант по качеству не превосходит основной.
+    """
+    if product is None:
+        product = detect_product_name(query)
+    web_payment = False
+    if product is None:
+        p = web_payment_product(query)
+        if p:
+            product = p
+            web_payment = True
+
+    if web_payment:
+        # Тема «оплата/эквайринг на сайте» семантически однозначна для эмбеддинга,
+        # а FTS5 без стемминга для таких запросов даёт лишь шум (страницы-доноры
+        # «сайт/подключ», не попавшие в векторный топ, получают RRF-буст и глушат
+        # верные ответы оплаты). Поэтому здесь полагаемся на векторный поиск по
+        # продукту — он возвращает именно «способы оплаты» Parts.Resource.
+        rows, elapsed = vector_main(query, product, limit, embed_host)
+        return rows, elapsed
+
+    rows, elapsed = _hybrid_inner(query, product, limit, snippets, embed_host)
+
+    # Fallback по раскладке: только когда результат слабый (пустой или шумный).
+    if product is None and rows:
+        primary_cov = _result_coverage(query, rows)
+    else:
+        primary_cov = 0.0
+
+    if (product is None
+            and (not rows or primary_cov < 0.34)):
+        alt = _layout_variant(query)
+        if alt:
+            alt_rows, _ = _hybrid_inner(alt, None, limit, snippets, embed_host)
+            if alt_rows:
+                alt_cov = _result_coverage(alt, alt_rows)
+                if not rows:
+                    return alt_rows, elapsed
+                if alt_cov >= primary_cov + 0.34:
+                    return alt_rows, elapsed
+    return rows, elapsed
+
+
+def _hybrid_inner(query, product, limit, snippets, embed_host):
+    """Собственно слияние FTS5 + vector для одного запроса/продукта."""
+    try:
+        import embed
+        from typesense_client import vector_search
+    except ImportError:
+        return search(terms(query), product, limit, snippets)
+
+    if not embed.ollama_is_available(host=embed_host):
+        return search(terms(query), product, limit, snippets)
+
+    t0 = time.perf_counter()
+    norm_terms = normalize_terms(terms(query))
+
+    # 1) FTS5 results
+    fts_rows, _ = search(terms(query), product, limit=RRF_TOP, snippets=snippets)
+
+    # 2) Vector results (по canonical-запросу: нижний регистр + исправление
+    #    опечаток — иначе embed видит регистр/опечатки и искажает соседей).
+    vec_rows = []
+    try:
+        canonical, _ = _canonical_query(query)
+        vec = embed.embed_text(canonical, host=embed_host)
+        vec_hits = vector_search(vec, k=RRF_TOP, product=product)
+        # Normalize to same row format: (product, page, title, path, snippet, score)
+        for h in vec_hits:
+            vec_rows.append((
+                h.get("product"), h.get("page"), h.get("title"),
+                h.get("path"), "", h.get("_score", 0),
+            ))
+    except Exception:
+        vec_rows = []
+
+    # 3) Уверенное слияние (общий модуль fusion.py): RRF + терм-буст +
+    #    API-intent буст + развязка ничьих по векторной уверенности (vec_score).
+    from fusion import fuse
+    merge_keys, meta = fuse(query, fts_rows, vec_rows, product)
+
+    # 4) Топ-N (с дедупликацией кросс-продуктовых страниц при product=None)
+    merged = merge_keys[:limit]
+    if product is None and merged:
+        deduped = {}  # page -> (key, products_set)
+        for key in merged:
+            pg = key[1]
+            if pg not in deduped:
+                deduped[pg] = (key, {key[0]})
+            else:
+                deduped[pg][1].add(key[0])
+        merged = [v[0] for v in deduped.values()]
+        page_products = {k: sorted(v[1]) for k, v in deduped.items()}
+    else:
+        page_products = {}
+
+    # 5) Map back to full row
+    fts_by_key = {(r[0], r[1]): r for r in fts_rows}
+    vec_by_key = {(r[0], r[1]): r for r in vec_rows}
+    out = []
+    for key in merged:
+        if key in fts_by_key:
+            row = list(fts_by_key[key])
+        elif key in vec_by_key:
+            row = list(vec_by_key[key])
+        else:
+            continue
+        pg = key[1]
+        if pg in page_products and len(page_products[pg]) > 1:
+            row = list(row)
+            row[0] = ",".join(page_products[pg])  # comma-separated products
+            row[4] = ""  # clear snippet for deduped
+            row = tuple(row)
+        out.append(row)
+
+    elapsed = (time.perf_counter() - t0) * 1000
+
+    if not out:
+        # fallback
+        return fallback_like(terms(query), product, limit), elapsed
+    return out, elapsed
+
+
+def terms(query):
+    return [t for t in query.split() if t]
+
+
+def vector_main(query, product=None, limit=5, embed_host=None):
+    """Чисто векторный поиск через Typesense + Ollama.
+
+    Возвращает rows в том же формате, что search():
+      (product, page, title, path, snippet, score)
+    embed_host: переопределение хоста Ollama для эмбеддинга запроса.
+    """
+    try:
+        import embed
+        from typesense_client import vector_search
+    except ImportError:
+        return [], 0.0
+
+    if not embed.ollama_is_available(host=embed_host):
+        import sys
+        print("Warning: Ollama недоступна, векторный поиск невозможен. "
+              "Попробуйте --mode fts", file=sys.stderr)
+        return [], 0.0
+
+    t0 = time.perf_counter()
+    try:
+        canonical, _ = _canonical_query(query)
+        vec = embed.embed_text(canonical, host=embed_host)
+        vec_hits = vector_search(vec, k=limit * 10, product=product)
+    except Exception as e:
+        return [], 0.0
+
+    rows = []
+    for h in vec_hits[:limit]:
+        rows.append((
+            h.get("product"), h.get("page"), h.get("title") or "",
+            h.get("path"), "", h.get("_score", 0),
+        ))
+    elapsed = (time.perf_counter() - t0) * 1000
+    return rows, elapsed
+
+
 def main():
     ap = argparse.ArgumentParser(description="Поиск по БД (FTS5-индекс)")
     ap.add_argument("query", help="Поисковый запрос")
@@ -309,17 +1033,24 @@ def main():
     ap.add_argument("--auto", action="store_true", help="Без вопросов, поиск по всем продуктам")
     ap.add_argument("--top", type=int, default=5, help="Сколько результатов (по умолчанию 5)")
     ap.add_argument("--no-snippet", action="store_true", help="Не показывать сниппеты")
+    ap.add_argument("--mode", choices=["fts", "vector", "hybrid"], default="hybrid",
+                    help="Режим поиска (по умолчанию hybrid)")
     args = ap.parse_args()
 
-    terms = [t for t in args.query.split() if t]
-    if not terms:
+    terms_ = terms(args.query)
+    if not terms_:
         sys.exit("Пустой запрос")
 
     product = ask_product(args.query, forced_product=args.product, auto=args.auto)
     if product:
         print(f"Продукт: {PRODUCTS[product]}")
 
-    rows, elapsed = search(terms, product, args.top, not args.no_snippet)
+    if args.mode == "hybrid":
+        rows, elapsed = search_hybrid(args.query, product, args.top, not args.no_snippet)
+    elif args.mode == "vector":
+        rows, elapsed = vector_main(args.query, product, args.top)
+    else:
+        rows, elapsed = search(terms_, product, args.top, not args.no_snippet)
     if not rows:
         print(f"Найдено: {len(rows)} (время {elapsed:.1f} мс)")
         print("По введенным данным нет результатов.")

@@ -48,7 +48,11 @@ python3 ask.py "передача НДС в эквайринг" | pbcopy
 
 ## search.py
 
-Поиск по FTS5-индексу со сниппетами.
+Поиск со сниппетами. Поддерживает три режима (`--mode`):
+
+- `fts` (классический) — точный поиск по FTS5-индексу;
+- `vector` — семантический поиск по Typesense (запрос → эмбеддинг через Ollama);
+- `hybrid` (по умолчанию) — объединение FTS5 + vector через Reciprocal Rank Fusion (RRF).
 
 ```bash
 python3 scripts/search.py "НДС эквайринг"
@@ -56,9 +60,15 @@ python3 scripts/search.py "налоговая система" --product parts-re
 python3 scripts/search.py "nastrojka onlajn kassy" --top 3
 python3 scripts/search.py "прайс-лист" --auto
 python3 scripts/search.py "что-то" --no-snippet
+python3 scripts/search.py "оплата картой" --mode vector
+python3 scripts/search.py "приём возврата товара" --mode hybrid
 ```
 
-Опции: `--product`, `--auto`, `--top N` (по умолчанию 5), `--no-snippet`.
+Опции: `--product`, `--auto`, `--top N` (по умолчанию 5), `--no-snippet`,
+`--mode fts|vector|hybrid` (по умолчанию hybrid).
+
+В режиме `hybrid` при недоступности Typesense/Ollama автоматически
+происходит откат на чистый FTS5.
 
 Поиск точный, по ключевым словам контекста:
 - стоп-слова («в», «на», «для», …) отбрасываются, дефисные слова разбиваются
@@ -77,16 +87,97 @@ python3 scripts/search.py "что-то" --no-snippet
 ## ask.py
 
 Выводит полный текст найденных страниц — готовый контекст для LLM.
+Поддерживает те же режимы `--mode`, что и search.py.
 
 ```bash
 python3 scripts/ask.py "передача НДС в эквайринг"
 python3 scripts/ask.py "ставка НДС онлайн касса" --product parts-resource-guide
 python3 scripts/ask.py "интернет-магазин оплата картой" --top 3 --max-chars 12000
 python3 scripts/ask.py "вопрос" --auto | pbcopy
+python3 scripts/ask.py "как оформить возврат" --mode hybrid
 ```
 
 Опции: `--product`, `--auto`, `--top N` (по умолчанию 4), `--max-chars N`
-(максимум символов на страницу, по умолчанию 20000), `--no-sources`.
+(максимум символов на страницу, по умолчанию 20000), `--no-sources`,
+`--mode fts|vector|hybrid` (по умолчанию hybrid).
+
+## Семантический поиск (Typesense + Ollama)
+
+Для семантического/гибридного поиска нужны две службы и построенный
+векторный индекс.
+
+### 1. Локальный запуск служб
+
+Typesense в Docker:
+
+```bash
+docker run -d --name typesense \
+  -p 8108:8108 -p 8109:8109 \
+  -v tradesoft-typesense-data:/data \
+  typesense/typesense:27.1 \
+  --api-key=ts_local_dev_key --data-dir=/data --enable-cors
+```
+
+Ollama (десктоп-приложение или `brew install ollama`), затем:
+
+```bash
+ollama pull qwen3-embedding:4b
+```
+
+`config.py` автоматически определяет окружение (см. `get_config()`):
+
+- `TS_ENV=local` — локальные службы (`localhost:8108`, `localhost:11434`)
+- `TS_ENV=prod` — продакшен (`sup5.tradesoft.corp:8108`, `:6791`)
+- без `TS_ENV` (по умолчанию) — автоопределение: если `http://localhost:8108`
+  отвечает, берутся локальные службы, иначе продакшен.
+
+Например, поиск по прод-индексу: `TS_ENV=prod python3 scripts/search.py "..." --mode hybrid`.
+
+### 2. Построение векторного индекса
+
+```bash
+python3 scripts/build_vector_index.py          # инкрементально
+python3 scripts/build_vector_index.py --rebuild  # полная переиндексация
+python3 scripts/build_vector_index.py --workers 6  # параллельных запросов к Ollama
+python3 scripts/build_vector_index.py --dry-run   # показать план, ничего не менять
+```
+
+Для индексации прод-сервера (эмбеддинг через прод-Ollama, запись в
+прод-Typesense): `TS_ENV=prod python3 scripts/build_vector_index.py --rebuild`.
+
+Индексатор читает чанки из SQLite FTS-индекса (`build_index.py`),
+векторизует их через Ollama (`qwen3-embedding:4b`, 2560 измерений) и
+записывает в Typesense-коллекцию `kb_chunks`. Чанки до 8000 символов
+индексируются целиком; более крупные усекаются до безопасного для
+контекста модели размера.
+
+### 3. Отдельный векторный поиск
+
+```bash
+python3 scripts/vector_search.py "приём возврата товара"
+python3 scripts/vector_search.py "оплата картой" --top 10
+python3 scripts/vector_search.py --product parts-resource-guide "интернет-магазин"
+```
+
+### 4. Визуальное сравнение выдачи
+
+Веб-страница для сравнения FTS / Vector / Hybrid по одному вопросу: три колонки
+с таймингами, в Hybrid помечается происхождение каждой страницы
+(«семантика» — нашёл только vector, «FTS» — только FTS-индекс). Клик по
+результату открывает полный текст страницы с подсветкой терминов запроса.
+
+```bash
+python3 scripts/eval_server.py            # → http://127.0.0.1:8055 (по умолчанию локальный индекс)
+TS_ENV=prod python3 scripts/eval_server.py   # страница против прод-индекса
+```
+
+Сервер слушает `0.0.0.0` и доступен из локальной сети — адрес печатается
+при старте. Если другие машины не открывают, разрешите входящие подключения
+для Python в Системных настройках → Сеть → Межсетевой экран.
+
+API (для скриптов): `GET /api/compare?q=...&top=5&product=...` — JSON со всеми
+тремя режимами за один вызов; `GET /api/page?product=...&page=...` — полный
+текст страницы.
 
 ## build_index.py
 
