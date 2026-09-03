@@ -1,31 +1,85 @@
 {
-  "updated_at": "2026-08-11T15:59:27+0300",
+  "updated_at": "2026-09-03T20:54:29+0300",
   "products": {
+    "delivery_schedule": {
+      "display": "График поставок",
+      "source": "https://product-doc.tradesoft.ru/ai/delivery_schedule/",
+      "version": "",
+      "pages": 10,
+      "images": 64,
+      "images_bytes": 402084,
+      "alljs_hash": "e9da43a0ed9c753d2725cc2fef4c55cb5f36b7f213651b126e2e81265fc93f65"
+    },
+    "diadok": {
+      "display": "Диадок",
+      "source": "https://product-doc.tradesoft.ru/ai/diadok/",
+      "version": "",
+      "pages": 11,
+      "images": 58,
+      "images_bytes": 491856,
+      "alljs_hash": "c1eeaf61c8e9fc7a96d9a8a8020239478e7b4c6a340d48ea2b6bdf90d0e4b42e"
+    },
+    "marketplace": {
+      "display": "Маркетплейсы",
+      "source": "https://product-doc.tradesoft.ru/ai/marketplace/",
+      "version": "",
+      "pages": 27,
+      "images": 52,
+      "images_bytes": 3488482,
+      "alljs_hash": "1f3cdf42858044021dfe47986094009bd5403dcd5b484b23d9d783a5016b3819"
+    },
+    "parts-index-rest-api": {
+      "display": "PartsIndex — REST API",
+      "source": "https://product-doc.tradesoft.ru/ai/rest_api/",
+      "version": "",
+      "pages": 82,
+      "images": 2,
+      "images_bytes": 14848,
+      "alljs_hash": "20699acb0de70513a4b2ddec69f201299484bd22513082fa6a7d76bcefda4f61"
+    },
+    "parts-intellect-changes": {
+      "display": "Изменения Parts.Intellect (версии)",
+      "source": "https://product-doc.tradesoft.ru/ai/changes/",
+      "version": "",
+      "pages": 28,
+      "images": 196,
+      "images_bytes": 4501418,
+      "alljs_hash": "d120dd663ee1d20bacf6e9c461dc857bae4ee75d051104eb4838388a162670ec"
+    },
     "parts-intellect-guide": {
       "display": "Руководство пользователя Parts.Intellect",
       "source": "https://product-doc.tradesoft.ru/ai/ai/",
-      "version": "5.25",
-      "pages": 850,
-      "images": 5316,
-      "images_bytes": 43670160,
-      "alljs_hash": "55a1b0f456600d0517a99d1c49ca0d74be8e14cfb739aea2fd31c23643ae0dd2"
+      "version": "5.26",
+      "pages": 860,
+      "images": 5374,
+      "images_bytes": 44318333,
+      "alljs_hash": "7cfabb3934944ecb72fec4a1834d629eb9f1ab6cbaa2b04651ffae55f0fc478b"
     },
     "parts-intellect-synch": {
       "display": "Синхронизатор Parts.Intellect",
       "source": "https://product-doc.tradesoft.ru/ai/synch/",
-      "version": "5.25",
+      "version": "5.26",
       "pages": 68,
       "images": 156,
       "images_bytes": 1849818,
       "alljs_hash": "e952afecf4cac27ae1f4b0cfbe499c7837cc5d89204f266fc2dcbe6a7b20b351"
+    },
+    "parts-resource-changes": {
+      "display": "Изменения Parts.Resource (версии)",
+      "source": "https://product-doc.tradesoft.ru/ar/changes/",
+      "version": "",
+      "pages": 21,
+      "images": 101,
+      "images_bytes": 3090711,
+      "alljs_hash": "566ddc8a0fa9e0f6f95659dc09183492bc4b196e77cf77eb21ef3274cfd0cb08"
     },
     "parts-resource-guide": {
       "display": "Руководство пользователя Parts.Resource",
       "source": "https://product-doc.tradesoft.ru/ar/ar/",
       "version": "6.74",
       "pages": 854,
-      "images": 6236,
-      "images_bytes": 59912586,
+      "images": 6237,
+      "images_bytes": 59920782,
       "alljs_hash": "c5197bc4997377d335e24f5316ea00871f7c059a0b755c24563977663bbf4a24"
     },
     "parts-resource-rest-api": {
@@ -36,6 +90,33 @@
       "images": 9,
       "images_bytes": 105363,
       "alljs_hash": "be53463208adc25b3f54a3227fbf9d5e7313b2b66f62ed11d5592a253d452676"
+    },
+    "seo-guide": {
+      "display": "SEO-руководство",
+      "source": "https://product-doc.tradesoft.ru/ar/online_guides/seo_guide/",
+      "version": "",
+      "pages": 18,
+      "images": 42,
+      "images_bytes": 1668120,
+      "alljs_hash": "5148a3852e08e4c875a0251787f382897f3a66d5530afc3ad403a44c51d98c50"
+    },
+    "tsd": {
+      "display": "ТСД",
+      "source": "https://product-doc.tradesoft.ru/ai/tsd/",
+      "version": "",
+      "pages": 14,
+      "images": 87,
+      "images_bytes": 400062,
+      "alljs_hash": "2dfef4a0ff41c528e6f3549b652920f02d572afc087c6a7a9f1a63962a03ec3a"
+    },
+    "wazzup": {
+      "display": "Wazzup",
+      "source": "https://product-doc.tradesoft.ru/ai/other/wazzup/",
+      "version": "",
+      "pages": 5,
+      "images": 10,
+      "images_bytes": 204920,
+      "alljs_hash": "ea18a83232f3ebed9e9d4fdbfb08d6466447c1cff017d29487aad1e9efca1606"
     }
   }
 }

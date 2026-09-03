@@ -41,6 +41,15 @@ parts-intellect-synch|https://product-doc.tradesoft.ru/ai/synch/|Синхрон�
 parts-resource-rest-api|https://product-doc.tradesoft.ru/ar/rest_api/|REST API Parts.Resource
 parts-resource-guide|https://product-doc.tradesoft.ru/ar/ar/|Руководство пользователя Parts.Resource
 parts-intellect-guide|https://product-doc.tradesoft.ru/ai/ai/|Руководство пользователя Parts.Intellect
+parts-index-rest-api|https://product-doc.tradesoft.ru/ai/rest_api/|PartsIndex — REST API
+seo-guide|https://product-doc.tradesoft.ru/ar/online_guides/seo_guide/|SEO-руководство
+diadok|https://product-doc.tradesoft.ru/ai/diadok/|Диадок
+delivery_schedule|https://product-doc.tradesoft.ru/ai/delivery_schedule/|График поставок
+wazzup|https://product-doc.tradesoft.ru/ai/other/wazzup/|Wazzup
+tsd|https://product-doc.tradesoft.ru/ai/tsd/|ТСД
+marketplace|https://product-doc.tradesoft.ru/ai/marketplace/|Маркетплейсы
+parts-resource-changes|https://product-doc.tradesoft.ru/ar/changes/|Изменения Parts.Resource (версии)
+parts-intellect-changes|https://product-doc.tradesoft.ru/ai/changes/|Изменения Parts.Intellect (версии)
 EOF
 )
 
