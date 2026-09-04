@@ -504,14 +504,14 @@ rrf[k] += rank_model.weight_adjustment(features[k])   #  Σ wi·fi
 
 - `ThreadingHTTPServer` на порту 8055 (по умолчанию)
 - Управляется через launchd (`com.tradesoft.kb-eval-server.plist`)
-- Поддерживает 2 вида страниц: eval (`/`) и hybrid (`/hybrid`)
+- Отдаёт страницу hybrid-поиска на корне; публичный доступ идёт через nginx reverse-proxy (HTTPS) — см. «Доступ по алиасу» ниже
 
 ### 7.2 API-эндпоинты
 
 | Метод | Путь | Назначение |
 |-------|------|------------|
-| `GET` | `/` | Страница eval-интерфейса |
-| `GET` | `/hybrid` | Страница hybrid-поиска |
+| `GET` | `/`, `/index.html`, `/hybrid`, `/hybrid.html` | Страница hybrid-поиска |
+| `GET` | `/api/hybrid?q=...&top=10` | Гибридный поиск для UI (через `run_compare()`) |
 | `GET` | `/api/hybrid?q=...&top=10` | Гибридный поиск для UI (через `run_compare()`) |
 | `GET` | `/api/v1/search?q=...&mode=hybrid&top=10&product=...` | Универсальный поиск API v1 |
 | `GET` | `/api/v1/products` | Список продуктов |
@@ -677,8 +677,8 @@ tradesoft-kb/
 │   ├── eval_queries.json         # 40 query ground-truth
 │   ├── convert_svc_spec.py       # OpenAPI → KB страницы
 │   ├── fetch.sh                  # Загрузка документации
-│   ├── eval_page.html            # Страница eval-интерфейса
-│   ├── hybrid_page.html          # Страница hybrid-поиска
+│   ├── eval_page.html            # Страница сравнения (не раздаётся; заменена hybrid на корне)
+│   ├── hybrid_page.html          # Страница hybrid-поиска (раздаётся на корне /)
 │   └── launchd/
 │       ├── com.tradesoft.kb-eval-server.plist   # Сервер (port 8055)
 │       └── com.tradesoft.vector-index.plist     # Переиндексация (RunAtLoad)
@@ -758,6 +758,32 @@ python scripts/rank_train.py
 python scripts/eval_server.py --port 8055 --log-dir logs
 ```
 
+### 11.4 Доступ по алиасу (nginx + HTTPS)
+
+Публичный доступ к eval-серверу идёт через nginx reverse-proxy по алиасу
+`kb.tradesoft.corp` (HTTPS). Сервер слушает `0.0.0.0:8055`, nginx пробрасывает
+`443` → `127.0.0.1:8055` и отвечает HTTP→HTTPS редиректом.
+
+Компоненты:
+- **nginx** — установлен через Homebrew (`/opt/homebrew/etc/nginx`), автозапуск
+  через `brew services start nginx` (`~/Library/LaunchAgents/homebrew.mxcl.nginx.plist`).
+- **server block** — `/opt/homebrew/etc/nginx/servers/kb.tradesoft.corp.conf`
+  (проброс на `127.0.0.1:8055`, заголовки `X-Real-IP`/`X-Forwarded-For`,
+  редирект http→https).
+- **Самоподписанный сертификат** — `/opt/homebrew/etc/nginx/ssl/kb.tradesoft.corp.{crt,key}`,
+  SAN: `DNS:kb.tradesoft.corp`, `IP:10.182.174.97`, `IP:127.0.0.1` (действует 825 дней).
+- **Запись в `/etc/hosts`** — `127.0.0.1 kb.tradesoft.corp` (для доступа с этой машины;
+  коллеги из подсети добавляют `10.182.174.97 kb.tradesoft.corp` в свой hosts
+  или используют IP `http://10.182.174.97:8055/`).
+
+Точки входа:
+- `https://kb.tradesoft.corp/` — гибридный поиск (основной доступ)
+- `http://10.182.174.97:8055/` — прямой доступ без TLS (внутри подсети)
+
+> Сертификат самоподписанный — браузер показывает предупреждение. Для его
+> устранения сертификат нужно добавить в доверенные корневые ЦС (macOS Keychain)
+> на машинах клиентов.
+
 ---
 
 ## 12. Известные ограничения
@@ -816,7 +842,7 @@ python scripts/eval_server.py --port 8055 --log-dir logs
 | Файл | Строк | Назначение |
 |------|-------|------------|
 | `search.py` | 1069 | Ядро поиска, гибрид, product detection, web_payment_product |
-| `eval_server.py` | 1103 | HTTP-сервер, API-эндпоинты, run_compare/run_search_v1 |
+| `eval_server.py` | 1096 | HTTP-сервер, API-эндпоинты, run_compare/run_search_v1 (гибрид на корне) |
 | `fusion.py` | 157 | RRF, FEAT_NAMES, fuse(), rank_model интеграция |
 | `rank_model.py` | 78 | Загрузка весов, weight_adjustment(), dump_status() |
 | `rank_train.py` | 300 | Обучение по неявным сигналам, pairwise ranking |

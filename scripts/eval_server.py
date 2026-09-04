@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Страница сравнения выдачи: FTS / Vector / Hybrid.
+"""Гибридный поиск (страница) + API.
 
-Сервер на stdlib. Раздаёт scripts/eval_page.html и API /api/compare.
+Сервер на stdlib. Отдаёт scripts/hybrid_page.html на корне и API
+(внутренний /api/compare для диагностики выдачи).
 
   python3 eval_server.py [--port 8055]
 """
@@ -20,7 +21,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-PAGE_PATH = os.path.join(SCRIPT_DIR, "eval_page.html")
 HYBRID_PAGE_PATH = os.path.join(SCRIPT_DIR, "hybrid_page.html")
 PRODUCTS_ROOT = os.path.join(os.path.dirname(SCRIPT_DIR), "products")
 
@@ -721,16 +721,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlsplit(self.path)
         path = parsed.path
 
-        if path in ("/", "/index.html"):
-            if not os.path.exists(PAGE_PATH):
-                self._send(500, "text/plain; charset=utf-8",
-                           f"Нет файла страницы: {PAGE_PATH}")
-                return
-            with open(PAGE_PATH, encoding="utf-8") as f:
-                self._send(200, "text/html; charset=utf-8", f.read())
-            return
-
-        if path in ("/hybrid", "/hybrid.html"):
+        if path in ("/", "/index.html", "/hybrid", "/hybrid.html"):
             if not os.path.exists(HYBRID_PAGE_PATH):
                 self._send(500, "text/plain; charset=utf-8",
                            f"Нет файла страницы: {HYBRID_PAGE_PATH}")
