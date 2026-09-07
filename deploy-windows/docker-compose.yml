@@ -1,0 +1,25 @@
+services:
+  typesense:
+    image: typesense/typesense:27.1
+    container_name: kb-typesense
+    restart: unless-stopped
+    ports:
+      - "8108:8108"
+      - "8109:8109"
+    volumes:
+      - ./data/typesense:/data
+    command:
+      - --data-dir=/data
+      - --api-key=${TYPESENSE_KEY:-ts_local_dev_key}
+      - --enable-cors
+    environment:
+      - TYPESENSE_API_KEY=${TYPESENSE_KEY:-ts_local_dev_key}
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kb-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
