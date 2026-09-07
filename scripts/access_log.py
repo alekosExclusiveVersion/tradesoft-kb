@@ -459,6 +459,53 @@ def success_metrics(hours: int = 24) -> dict:
         c.close()
 
 
+def unsatisfied(hours: int = 24, limit: int = 50) -> list:
+    """«Неудовлетворённый спрос»: запросы, где не было результата либо не было
+    взаимодействия (клик/открытие документа).
+
+    Каждая строка — канонический запрос. Считаются:
+      - total        — сколько раз искали;
+      - zero_results — сколько раз вернулось 0 результатов;
+      - no_interact  — сколько раз результат был, но не последовало ни клика,
+                       ни открытия документа (возможная неудовлетворённость);
+      - unsatisfied  — сумма первых двух;
+      - product      — последний детектированный продукт (может быть None);
+      - last_ts      — время последнего запроса.
+    """
+    since = time.strftime("%Y-%m-%dT%H:%M:%S",
+                          time.localtime(time.time() - hours * 3600))
+    c = _ro_conn()
+    try:
+        rows = c.execute(
+            "SELECT se.q_canonical q, COUNT(*) total, "
+            "SUM(CASE WHEN se.n_results=0 THEN 1 ELSE 0 END) zero_results, "
+            "SUM(CASE WHEN f.clicked IS NULL THEN 1 ELSE 0 END) no_interact, "
+            "MAX(se.product_detected) product, MAX(se.ts) last_ts "
+            "FROM search_events se "
+            "LEFT JOIN ("
+            "  SELECT DISTINCT search_event_id, 1 clicked "
+            "  FROM events WHERE type IN ('open','click') AND ts>=? ) f "
+            "  ON f.search_event_id = se.id "
+            "WHERE se.ts>=? AND se.q_canonical IS NOT NULL "
+            "GROUP BY se.q_canonical "
+            "ORDER BY (SUM(CASE WHEN se.n_results=0 "
+            "           OR f.clicked IS NULL THEN 1 ELSE 0 END)) DESC, "
+            "         COUNT(*) DESC "
+            "LIMIT ?", (since, since, limit)).fetchall()
+        out = []
+        for q, total, zero, no_int, prod, last_ts in rows:
+            unsatisfied = (zero or 0) + (no_int or 0)
+            out.append({
+                "query": q, "total": total,
+                "zero_results": zero or 0, "no_interact": no_int or 0,
+                "unsatisfied": unsatisfied,
+                "product": prod, "last_ts": last_ts,
+            })
+        return out
+    finally:
+        c.close()
+
+
 def raw(hours: int = 24, limit: int = 50) -> list:
     since = time.strftime("%Y-%m-%dT%H:%M:%S",
                           time.localtime(time.time() - hours * 3600))

@@ -1,0 +1,485 @@
+openapi: 3.0.3
+info:
+  title: Tradesoft KB API
+  description: |
+    <h1>Tradesoft KB API</h1>
+    <p>REST API для доступа к базе знаний Tradesoft.</p>
+
+    <h2>Механизм поиска</h2>
+    <p>Поиск использует <b>гибридную</b> модель (FTS5 + векторный поиск + ранжирование RRF):</p>
+    <ul>
+      <li><b>FTS</b> — полнотекстовый поиск по стемам слов (SQLite FTS5)</li>
+      <li><b>Vector</b> — семантический поиск через Ollama embeddings + Typesense</li>
+      <li><b>Hybrid</b> (по умолчанию) — комбинация обоих методов с Reciprocal Rank Fusion</li>
+    </ul>
+
+    <h3>Выбор режима</h3>
+    <p>Параметр <code>mode</code> в <code>/api/v1/search</code> позволяет выбрать режим:</p>
+    <table>
+      <tr><td><code>hybrid</code></td><td>Гибридный (рекомендуется)</td></tr>
+      <tr><td><code>fts</code></td><td>Только полнотекстовый</td></tr>
+      <tr><td><code>vector</code></td><td>Только векторный</td></tr>
+    </table>
+
+    <h3>Коррекция запросов</h3>
+    <p>Система автоматически исправляет:</p>
+    <ul>
+      <li><b>Опечатки</b> — замена слов с document frequency = 0 на ближайшие известные</li>
+      <li><b>Раскладку</b> — определение и исправление неверной раскладки клавиатуры</li>
+    </ul>
+    <p>Результат коррекции возвращается в полях <code>corrected_query</code> и <code>correction_type</code>.</p>
+
+    <h3>Детекция продукта</h3>
+    <p>Если в запросе упомянут конкретный продукт («Parts.Resource», «Интеллект» и т.д.),
+    он определяется автоматически и возвращается в поле <code>detected_product</code>.</p>
+  version: 1.0.0
+  contact:
+    name: Tradesoft KB
+
+servers:
+  - url: http://localhost:8055
+    description: Local development
+  - url: https://kb.tradesoft.corp
+    description: Production (internal)
+
+paths:
+  /api/v1/search:
+    get:
+      summary: Гибридный поиск по базе знаний
+      description: |
+        Основной endpoint поиска. Поддерживает три режима: гибридный (по умолчанию),
+        полнотекстовый (FTS) и векторный. Автоматически исправляет опечатки и
+        определяет продукт по запросу.
+
+        Механизм работы (гибридный режим):
+        1. FTS5 поиск по стемам слов с релевантным ранжированием
+        2. Векторный поиск через Ollama embeddings (cosine similarity)
+        3. Объединение результатов через Reciprocal Rank Fusion (RRF)
+        4. Самообучающееся ранжирование по кликам пользователей
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Поисковый запрос
+          schema:
+            type: string
+            example: "как настроить эквайринг"
+        - name: mode
+          in: query
+          description: Режим поиска
+          schema:
+            type: string
+            enum: [hybrid, fts, vector]
+            default: hybrid
+        - name: top
+          in: query
+          description: Количество результатов (1-50)
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 50
+        - name: product
+          in: query
+          description: Фильтр по продукту
+          schema:
+            type: string
+            enum:
+              - parts-resource-guide
+              - parts-intellect-guide
+              - parts-intellect-pos
+              - delivery-schedule
+              - service-api
+        - name: debug
+          in: query
+          description: Включить отладочную информацию
+          schema:
+            type: string
+            enum: ["0", "1"]
+            default: "0"
+      responses:
+        "200":
+          description: Результаты поиска
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Ошибка валидации
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/document:
+    get:
+      summary: Получение содержимого страницы
+      description: |
+        Возвращает полное содержимое страницы документа в формате HTML или Markdown.
+        Используется для «углубления» в результат поиска.
+      parameters:
+        - name: product
+          in: query
+          required: true
+          description: ID продукта
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: true
+          description: Ключ страницы
+          schema:
+            type: string
+        - name: format
+          in: query
+          description: Формат ответа
+          schema:
+            type: string
+            enum: [html, markdown]
+            default: html
+        - name: chars
+          in: query
+          description: Максимальное количество символов (по умолчанию 30000)
+          schema:
+            type: integer
+            default: 30000
+            maximum: 200000
+      responses:
+        "200":
+          description: Содержимое страницы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentResponse"
+        "400":
+          description: Ошибка валидации
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/products:
+    get:
+      summary: Список продуктов
+      description: Возвращает список всех доступных продуктов в базе знаний.
+      responses:
+        "200":
+          description: Список продуктов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductsResponse"
+
+  /api/v1/products/{product_id}/pages:
+    get:
+      summary: Список страниц продукта
+      description: Возвращает все страницы указанного продукта с метаданными.
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          description: ID продукта
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Список страниц
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPagesResponse"
+        "400":
+          description: Неизвестный продукт
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/index/stats:
+    get:
+      summary: Статистика индекса
+      description: |
+        Возвращает статистику по базе знаний: количество страниц, распределение
+        по продуктам, последнее обновление, состояние сервисов.
+      responses:
+        "200":
+          description: Статистика индекса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexStatsResponse"
+
+  /api/v1/health:
+    get:
+      summary: Health check
+      description: Проверка состояния сервисов (Typesense, Ollama) и базы данных.
+      responses:
+        "200":
+          description: Состояние сервисов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/search:
+    get:
+      summary: Поиск для UI (legacy)
+      description: |
+        Эндпоинт для поиска из веб-интерфейса. Возвращает HTML-страницу.
+        Использует гибридный механизм поиска (FTS + vector + RRF).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: top
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: HTML страница с результатами
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /api/compare:
+    get:
+      summary: Сравнение режимов поиска (debug)
+      description: |
+        Сравнивает результаты FTS, vector и hybrid поиска для отладки.
+        Показывает объяснение ранжирования (explain).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: top
+          in: query
+          schema:
+            type: integer
+            default: 5
+        - name: product
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Результаты сравнения
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompareResponse"
+
+components:
+  schemas:
+    SearchResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        query:
+          type: string
+          description: Исходный запрос
+        mode:
+          type: string
+          enum: [hybrid, fts, vector]
+        total:
+          type: integer
+        elapsed_ms:
+          type: number
+        source:
+          type: string
+        services:
+          $ref: "#/components/schemas/Services"
+        corrected_query:
+          type: string
+          nullable: true
+          description: Исправленный запрос (null если коррекция не потребовалась)
+        correction_type:
+          type: string
+          enum: [typo, layout, none]
+          description: Тип коррекции: typo (опечатка), layout (раскладка), none
+        detected_product:
+          type: string
+          nullable: true
+          description: Определённый из запроса продукт (null если не определён)
+        facets:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Количество результатов по продуктам
+        debug:
+          type: object
+          description: Отладочная информация (только при debug=1)
+          properties:
+            canonical:
+              type: string
+            layout_alternative:
+              type: string
+              nullable: true
+            product_filter:
+              type: string
+              nullable: true
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+
+    SearchResult:
+      type: object
+      properties:
+        rank:
+          type: integer
+        product:
+          type: string
+        product_display:
+          type: string
+        page:
+          type: string
+        title:
+          type: string
+        snippet:
+          type: string
+        path:
+          type: string
+        score:
+          type: number
+          description: Итоговый score (RRF)
+
+    DocumentResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        product:
+          type: string
+        product_display:
+          type: string
+        page:
+          type: string
+        title:
+          type: string
+        path:
+          type: string
+        chars:
+          type: integer
+        truncated:
+          type: boolean
+        content:
+          type: string
+          description: Содержимое в формате Markdown (только при format=markdown)
+        content_html:
+          type: string
+          description: Содержимое в формате HTML (только при format=html)
+
+    ProductsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        products:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              display:
+                type: string
+
+    ProductPagesResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        product:
+          type: string
+        product_display:
+          type: string
+        total:
+          type: integer
+        pages:
+          type: array
+          items:
+            type: object
+            properties:
+              page:
+                type: string
+              title:
+                type: string
+              path:
+                type: string
+
+    IndexStatsResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        total_pages:
+          type: integer
+        by_product:
+          type: object
+          additionalProperties:
+            type: integer
+        last_modified:
+          type: string
+          format: date-time
+          nullable: true
+        services:
+          $ref: "#/components/schemas/Services"
+        db_path:
+          type: string
+        db_size_bytes:
+          type: integer
+
+    HealthResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        services:
+          $ref: "#/components/schemas/Services"
+        db:
+          type: boolean
+
+    CompareResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        query:
+          type: string
+        fts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+        vector:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+        hybrid:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+
+    Services:
+      type: object
+      properties:
+        typesense:
+          type: boolean
+        ollama:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: false
+        error:
+          type: string

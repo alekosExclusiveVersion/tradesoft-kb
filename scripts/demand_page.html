@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Неудовлетворённый спрос — Tradesoft KB</title>
+<style>
+  :root {
+    --hyb: #7c3aed; --hyb-bg: #f5f3ff; --hyb-border: #ddd6fe;
+    --ink: #1f2937; --mut: #6b7280; --line: #e5e7eb; --card: #ffffff;
+    --warn: #b45309; --warn-bg: #fffbeb; --warn-line: #fde68a;
+    --danger: #b91c1c; --danger-bg: #fef2f2; --danger-line: #fecaca;
+    --ok: #047857; --ok-bg: #ecfdf5; --ok-line: #a7f3d0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--ink); background: #f3f4f6;
+  }
+  header {
+    background: var(--card); border-bottom: 1px solid var(--line);
+    padding: 16px 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  }
+  h1 { font-size: 18px; margin: 0 16px 0 0; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  h1 .pill {
+    font-size: 11px; font-weight: 600; background: var(--hyb); color: #fff;
+    padding: 2px 9px; border-radius: 999px; letter-spacing: .03em;
+  }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+  .controls label { color: var(--mut); font-size: 13px; }
+  select, button {
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card); font-size: 14px; cursor: pointer;
+  }
+  button { background: var(--hyb); color: #fff; font-weight: 500; }
+  button:hover { filter: brightness(1.08); }
+  .summary {
+    max-width: 1080px; margin: 18px auto 0; padding: 0 16px;
+    display: flex; gap: 12px; flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 16px; min-width: 130px;
+  }
+  .stat b { display: block; font-size: 22px; line-height: 1.1; }
+  .stat span { color: var(--mut); font-size: 12px; }
+  main { max-width: 1080px; margin: 18px auto 40px; padding: 0 16px; }
+  #status { color: var(--mut); margin: 8px 0; }
+  table {
+    width: 100%; border-collapse: collapse; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { background: #f9fafb; color: var(--mut); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #faf9ff; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .q { font-weight: 600; }
+  .badge {
+    display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  }
+  .b-zero { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-line); }
+  .b-noi  { background: var(--warn-bg);  color: var(--warn);  border: 1px solid var(--warn-line); }
+  .b-both { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-line); }
+  .b-ok   { background: var(--ok-bg);     color: var(--ok);    border: 1px solid var(--ok-line); }
+  .empty { padding: 40px; text-align: center; color: var(--mut); background: var(--card);
+           border: 1px dashed var(--line); border-radius: 10px; }
+  a.run { color: var(--hyb); text-decoration: none; font-size: 12px; white-space: nowrap; }
+  a.run:hover { text-decoration: underline; }
+  .prod { color: var(--mut); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Неудовлетворённый спрос <span class="pill">KB</span></h1>
+  <div class="controls">
+    <label>За период:</label>
+    <select id="hours">
+      <option value="6">6 часов</option>
+      <option value="24" selected>сутки</option>
+      <option value="24*7">7 дней</option>
+      <option value="24*30">30 дней</option>
+    </select>
+    <label>Строк:</label>
+    <select id="limit">
+      <option value="20">20</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+      <option value="200">200</option>
+    </select>
+    <button id="go">Обновить</button>
+  </div>
+</header>
+
+<div class="summary" id="summary"></div>
+
+<main>
+  <div id="status"></div>
+  <table id="tbl" style="display:none">
+    <thead>
+      <tr>
+        <th>Запрос</th>
+        <th>Продукт</th>
+        <th class="num">Всего</th>
+        <th class="num">Без результатов</th>
+        <th class="num">С результатом, без открытия</th>
+        <th class="num">Неудовл.</th>
+        <th>Последний</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none">За выбранный период неудовлетворённых запросов нет.</div>
+</main>
+
+<div id="error" style="display:none; padding:16px; text-align:center;"></div>
+
+<script>
+  function badge(clazz, text) {
+    return '<span class="badge ' + clazz + '">' + text + '</span>';
+  }
+  function fmtTs(ts) {
+    if (!ts) return '';
+    const d = new Date(ts.replace('T', ' ').replace(/\.[0-9]+$/, ''));
+    if (isNaN(d)) return ts;
+    return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function hoursVal() {
+    const raw = document.getElementById('hours').value;
+    const words = raw.split('*');
+    return words.length > 1 ? (+words[0]) * (+words[1]) : +raw;
+  }
+  async function fetchData() {
+    const hours = hoursVal();
+    const limit = document.getElementById('limit').value;
+    const url = '/api/access?op=unsatisfied&hours=' + hours + '&limit=' + limit;
+    const res = await fetch(url);
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || 'Ошибка');
+    return j;
+  }
+  async function load() {
+    const status = document.getElementById('status');
+    const empty = document.getElementById('empty');
+    const tbl = document.getElementById('tbl');
+    const err = document.getElementById('error');
+    empty.style.display = 'none';
+    err.style.display = 'none';
+    status.textContent = 'Загрузка…';
+    try {
+      const j = await fetchData();
+      const rows = j.data || [];
+      status.textContent = 'Показано запросов: ' + rows.length + ' (period ' + (j.hours || hoursVal()) + ' ч).';
+      renderSummary(rows);
+      const tb = document.getElementById('tbody');
+      tb.innerHTML = '';
+      if (!rows.length) { tbl.style.display = 'none'; empty.style.display = 'block'; return; }
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        let cls, lbl;
+        if (r.zero_results > 0 && r.no_interact > 0) { cls = 'b-both'; lbl = 'без рез. + без открытия'; }
+        else if (r.zero_results > 0) { cls = 'b-zero'; lbl = 'без результатов'; }
+        else { cls = 'b-noi'; lbl = 'без открытия'; }
+        const runLink = '/?q=' + encodeURIComponent(r.query) + '#q=' + encodeURIComponent(r.query);
+        tr.innerHTML =
+          '<td class="q">' + esc(r.query) + '</td>' +
+          '<td class="prod">' + esc(r.product || '—') + '</td>' +
+          '<td class="num">' + r.total + '</td>' +
+          '<td class="num">' + r.zero_results + '</td>' +
+          '<td class="num">' + r.no_interact + '</td>' +
+          '<td class="num">' + badge(cls, lbl) + '</td>' +
+          '<td>' + fmtTs(r.last_ts) + '</td>' +
+          '<td><a class="run" target="_blank" href="' + runLink + '">смотреть выдачу →</a></td>';
+        tb.appendChild(tr);
+      }
+      tbl.style.display = '';
+    } catch (e) {
+      status.textContent = '';
+      err.style.display = 'block';
+      err.textContent = 'Ошибка: ' + e.message;
+      tbl.style.display = 'none';
+    }
+  }
+  function renderSummary(rows) {
+    const total = rows.reduce((a, r) => a + r.total, 0);
+    const zero = rows.reduce((a, r) => a + r.zero_results, 0);
+    const noInt = rows.reduce((a, r) => a + r.no_interact, 0);
+    document.getElementById('summary').innerHTML =
+      stat(total, 'запросов (показано)') +
+      stat(zero, 'без результатов') +
+      stat(noInt, 'с результатом без открытия') +
+      stat(zero + noInt, 'неудовлетворённых');
+  }
+  function stat(n, label) {
+    return '<div class="stat"><b>' + n + '</b><span>' + label + '</span></div>';
+  }
+  document.getElementById('go').addEventListener('click', load);
+  document.getElementById('hours').addEventListener('change', load);
+  document.getElementById('limit').addEventListener('change', load);
+  load();
+</script>
+</body>
+</html>

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tradesoft KB API</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #1a1a1a; margin-bottom: 10px; font-size: 2em; }
+        h2 { color: #2c3e50; margin: 30px 0 15px; padding-bottom: 10px; border-bottom: 2px solid #3498db; }
+        h3 { color: #34495e; margin: 20px 0 10px; }
+        h4 { color: #555; margin: 15px 0 8px; }
+        .subtitle { color: #666; font-size: 1.1em; margin-bottom: 20px; }
+        .base-url { background: #fff; padding: 12px 16px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #3498db; }
+        .base-url code { font-family: 'Monaco', 'Menlo', monospace; background: #f8f9fa; padding: 2px 6px; border-radius: 3px; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th { background: #3498db; color: #fff; padding: 12px; text-align: left; }
+        td { padding: 10px 12px; border-bottom: 1px solid #eee; }
+        tr:hover { background: #f8f9fa; }
+        code { font-family: 'Monaco', 'Menlo', monospace; background: #f8f9fa; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+        pre { background: #2d2d2d; color: #f8f8f2; padding: 16px; border-radius: 6px; overflow-x: auto; margin: 15px 0; }
+        pre code { background: none; padding: 0; color: inherit; }
+        .method { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; margin-right: 8px; }
+        .get { background: #27ae60; color: #fff; }
+        .endpoint { background: #fff; padding: 16px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #27ae60; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .endpoint h4 { margin-top: 0; }
+        ul { margin: 10px 0 10px 20px; }
+        li { margin: 5px 0; }
+        .highlight { background: #fffacd; padding: 2px 4px; border-radius: 2px; }
+        .note { background: #e8f4fc; padding: 12px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #3498db; }
+        .warning { background: #fff3cd; padding: 12px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #ffc107; }
+        a { color: #3498db; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .toc { background: #fff; padding: 20px; border-radius: 6px; margin: 20px 0; }
+        .toc ul { list-style: none; }
+        .toc li { margin: 8px 0; }
+        .toc a { color: #3498db; }
+        hr { border: none; border-top: 1px solid #ddd; margin: 30px 0; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: bold; }
+        .badge-required { background: #e74c3c; color: #fff; }
+        .badge-optional { background: #95a5a6; color: #fff; }
+    </style>
+</head>
+<body>
+
+<h1>Tradesoft KB API</h1>
+<p class="subtitle">REST API для доступа к базе знаний Tradesoft</p>
+
+<div class="base-url">
+    <strong>Базовый URL:</strong>
+    <code>http://localhost:8055</code> | <code>https://kb.tradesoft.corp</code>
+</div>
+
+<div class="toc">
+    <h3>Содержание</h3>
+    <ul>
+        <li><a href="#search-mechanism">Механизм поиска</a></li>
+        <li><a href="#endpoints">Endpoints</a></li>
+        <li><a href="#examples">Примеры использования</a></li>
+        <li><a href="#products">Доступные продукты</a></li>
+    </ul>
+</div>
+
+<hr>
+
+<h2 id="search-mechanism">Механизм поиска</h2>
+
+<p>Поиск использует <b>гибридную</b> модель, комбинирующую три метода:</p>
+
+<h3>1. FTS (Full-Text Search)</h3>
+<ul>
+    <li>SQLite FTS5 с морфологическим анализом (pymorphy3)</li>
+    <li>Стемминг русских слов для точного совпадения форм</li>
+    <li>Лексикон для исправления опечаток</li>
+</ul>
+
+<h3>2. Vector Search</h3>
+<ul>
+    <li>Ollama embeddings (nomic-embed-text)</li>
+    <li>Typesense vector index с cosine similarity</li>
+    <li>Семантическое понимание запросов</li>
+</ul>
+
+<h3>3. Hybrid (по умолчанию)</h3>
+<ul>
+    <li>Комбинация FTS + Vector через <b>Reciprocal Rank Fusion (RRF)</b></li>
+    <li>Автоматическое взвешивание результатов</li>
+    <li>Самообучающееся ранжирование по кликам пользователей</li>
+</ul>
+
+<h3>Выбор режима</h3>
+<p>Параметр <code>mode</code> в <code>/api/v1/search</code>:</p>
+<table>
+    <tr><th>Значение</th><th>Описание</th></tr>
+    <tr><td><code>hybrid</code></td><td>Гибридный (рекомендуется)</td></tr>
+    <tr><td><code>fts</code></td><td>Только полнотекстовый</td></tr>
+    <tr><td><code>vector</code></td><td>Только векторный</td></tr>
+</table>
+
+<h3>Коррекция запросов</h3>
+<p>Система автоматически исправляет:</p>
+<ul>
+    <li><b>Опечатки</b> — замена слов с document frequency = 0 на ближайшие известные</li>
+    <li><b>Раскладку</b> — определение и исправление неверной раскладки клавиатуры</li>
+</ul>
+<p>Результат коррекции:</p>
+<ul>
+    <li><code>corrected_query</code> — исправленный запрос (null если не потребовалось)</li>
+    <li><code>correction_type</code> — тип: <code>typo</code>, <code>layout</code>, <code>none</code></li>
+</ul>
+
+<h3>Детекция продукта</h3>
+<p>Если в запросе упомянут продукт («Parts.Resource», «Интеллект» и т.д.), он определяется автоматически и возвращается в поле <code>detected_product</code>.</p>
+
+<hr>
+
+<h2 id="endpoints">Endpoints</h2>
+
+<div class="endpoint">
+    <h4><span class="method get">GET</span> /api/v1/search</h4>
+    <p>Гибридный поиск по базе знаний.</p>
+
+    <h4>Параметры</h4>
+    <table>
+        <tr><th>Параметр</th><th>Тип</th><th>Обязательный</th><th>Описание</th></tr>
+        <tr><td><code>q</code></td><td>string</td><td><span class="badge badge-required">Да</span></td><td>Поисковый запрос</td></tr>
+        <tr><td><code>mode</code></td><td>string</td><td><span class="badge badge-optional">Нет</span></td><td>Режим: <code>hybrid</code>, <code>fts</code>, <code>vector</code> (по умолчанию <code>hybrid</code>)</td></tr>
+        <tr><td><code>top</code></td><td>integer</td><td><span class="badge badge-optional">Нет</span></td><td>Количество результатов 1-50 (по умолчанию 10)</td></tr>
+        <tr><td><code>product</code></td><td>string</td><td><span class="badge badge-optional">Нет</span></td><td>Фильтр по продукту</td></tr>
+        <tr><td><code>debug</code></td><td>string</td><td><span class="badge badge-optional">Нет</span></td><td>Отладочная информация: <code>0</code> или <code>1</code></td></tr>
+    </table>
+
+    <h4>Ответ</h4>
+    <pre><code>{
+  "ok": true,
+  "query": "как настроить эквайринг",
+  "mode": "hybrid",
+  "total": 5,
+  "elapsed_ms": 123.4,
+  "source": "full",
+  "services": {"typesense": true, "ollama": true},
+  "corrected_query": null,
+  "correction_type": "none",
+  "detected_product": "parts-resource-guide",
+  "facets": {"parts-resource-guide": 3, "parts-intellect-guide": 2},
+  "results": [
+    {
+      "rank": 1,
+      "product": "parts-resource-guide",
+      "product_display": "Parts.Resource",
+      "page": "acquiring",
+      "title": "Настройка эквайринга",
+      "snippet": "...настроить эквайринг в системе...",
+      "path": "https://...",
+      "score": 0.95
+    }
+  ]
+}</code></pre>
+</div>
+
+<div class="endpoint">
+    <h4><span class="method get">GET</span> /api/v1/document</h4>
+    <p>Получение содержимого страницы документа.</p>
+
+    <h4>Параметры</h4>
+    <table>
+        <tr><th>Параметр</th><th>Тип</th><th>Обязательный</th><th>Описание</th></tr>
+        <tr><td><code>product</code></td><td>string</td><td><span class="badge badge-required">Да</span></td><td>ID продукта</td></tr>
+        <tr><td><code>page</code></td><td>string</td><td><span class="badge badge-required">Да</span></td><td>Ключ страницы</td></tr>
+        <tr><td><code>format</code></td><td>string</td><td><span class="badge badge-optional">Нет</span></td><td>Формат: <code>html</code> (по умолчанию) или <code>markdown</code></td></tr>
+        <tr><td><code>chars</code></td><td>integer</td><td><span class="badge badge-optional">Нет</span></td><td>Макс. символов (по умолчанию 30000)</td></tr>
+    </table>
+
+    <h4>Ответ (format=html)</h4>
+    <pre><code>{
+  "ok": true,
+  "product": "parts-resource-guide",
+  "product_display": "Parts.Resource",
+  "page": "acquiring",
+  "title": "Настройка эквайринга",
+  "path": "...",
+  "chars": 4521,
+  "truncated": false,
+  "content_html": "&lt;div class=\"page-content\"&gt;...&lt;/div&gt;"
+}</code></pre>
+
+    <h4>Ответ (format=markdown)</h4>
+    <pre><code>{
+  "ok": true,
+  "product": "parts-resource-guide",
+  "product_display": "Parts.Resource",
+  "page": "acquiring",
+  "title": "Настройка эквайринга",
+  "path": "...",
+  "chars": 4521,
+  "truncated": false,
+  "content": "# Настройка эквайринга\n\nДля настройки..."
+}</code></pre>
+</div>
+
+<div class="endpoint">
+    <h4><span class="method get">GET</span> /api/v1/products</h4>
+    <p>Список всех продуктов в базе знаний.</p>
+
+    <h4>Ответ</h4>
+    <pre><code>{
+  "ok": true,
+  "products": [
+    {"id": "parts-resource-guide", "display": "Parts.Resource"},
+    {"id": "parts-intellect-guide", "display": "Parts.Intellect"}
+  ]
+}</code></pre>
+</div>
+
+<div class="endpoint">
+    <h4><span class="method get">GET</span> /api/v1/products/{product_id}/pages</h4>
+    <p>Список страниц продукта.</p>
+
+    <h4>Параметры</h4>
+    <table>
+        <tr><th>Параметр</th><th>Тип</th><th>Обязательный</th><th>Описание</th></tr>
+        <tr><td><code>product_id</code></td><td>path</td><td><span class="badge badge-required">Да</span></td><td>ID продукта</td></tr>
+    </table>
+
+    <h4>Ответ</h4>
+    <pre><code>{
+  "ok": true,
+  "product": "parts-resource-guide",
+  "product_display": "Parts.Resource",
+  "total": 45,
+  "pages": [
+    {"page": "acquiring", "title": "Настройка эквайринга", "path": "..."},
+    {"page": "web", "title": "Веб-интерфейс", "path": "..."}
+  ]
+}</code></pre>
+</div>
+
+<div class="endpoint">
+    <h4><span class="method get">GET</span> /api/v1/index/stats</h4>
+    <p>Статистика индекса базы знаний.</p>
+
+    <h4>Ответ</h4>
+    <pre><code>{
+  "ok": true,
+  "total_pages": 312,
+  "by_product": {
+    "parts-resource-guide": 156,
+    "parts-intellect-guide": 89
+  },
+  "last_modified": "2025-01-15T10:30:00",
+  "services": {"typesense": true, "ollama": true},
+  "db_path": "/path/to/kb.db",
+  "db_size_bytes": 1048576
+}</code></pre>
+</div>
+
+<div class="endpoint">
+    <h4><span class="method get">GET</span> /api/v1/health</h4>
+    <p>Health check — проверка состояния сервисов.</p>
+
+    <h4>Ответ</h4>
+    <pre><code>{
+  "ok": true,
+  "services": {"typesense": true, "ollama": true},
+  "db": true
+}</code></pre>
+</div>
+
+<div class="endpoint">
+    <h4><span class="method get">GET</span> /api/compare</h4>
+    <p>Сравнение результатов FTS, Vector и Hybrid (для отладки).</p>
+
+    <h4>Параметры</h4>
+    <table>
+        <tr><th>Параметр</th><th>Тип</th><th>Обязательный</th><th>Описание</th></tr>
+        <tr><td><code>q</code></td><td>string</td><td><span class="badge badge-required">Да</span></td><td>Поисковый запрос</td></tr>
+        <tr><td><code>top</code></td><td>integer</td><td><span class="badge badge-optional">Нет</span></td><td>Количество результатов (по умолчанию 5)</td></tr>
+        <tr><td><code>product</code></td><td>string</td><td><span class="badge badge-optional">Нет</span></td><td>Фильтр по продукту</td></tr>
+    </table>
+
+    <h4>Ответ</h4>
+    <pre><code>{
+  "ok": true,
+  "query": "эквайринг",
+  "fts": [...],
+  "vector": [...],
+  "hybrid": [...]
+}</code></pre>
+</div>
+
+<hr>
+
+<h2 id="examples">Примеры использования</h2>
+
+<h3>Python</h3>
+<pre><code>import requests
+
+# Поиск
+r = requests.get("http://localhost:8055/api/v1/search", params={
+    "q": "как настроить эквайринг",
+    "mode": "hybrid",
+    "top": 5
+})
+data = r.json()
+
+# Получение документа
+doc = requests.get("http://localhost:8055/api/v1/document", params={
+    "product": data["results"][0]["product"],
+    "page": data["results"][0]["page"],
+    "format": "markdown"
+}).json()
+
+# Список продуктов
+products = requests.get("http://localhost:8055/api/v1/products").json()
+
+# Статистика
+stats = requests.get("http://localhost:8055/api/v1/index/stats").json()</code></pre>
+
+<h3>cURL</h3>
+<pre><code># Поиск
+curl "http://localhost:8055/api/v1/search?q=эквайринг&top=5"
+
+# Документ в markdown
+curl "http://localhost:8055/api/v1/document?product=parts-resource-guide&page=acquiring&format=markdown"
+
+# Продукты
+curl "http://localhost:8055/api/v1/products"
+
+# Страницы продукта
+curl "http://localhost:8055/api/v1/products/parts-resource-guide/pages"
+
+# Статистика
+curl "http://localhost:8055/api/v1/index/stats"
+
+# Debug режим
+curl "http://localhost:8055/api/v1/search?q=эквайринг&debug=1"</code></pre>
+
+<h3>JavaScript</h3>
+<pre><code>// Поиск
+const search = await fetch("/api/v1/search?q=эквайринг&top=5").then(r => r.json());
+
+// Документ
+const doc = await fetch(`/api/v1/document?product=${search.results[0].product}&page=${search.results[0].page}`).then(r => r.json());</code></pre>
+
+<hr>
+
+<h2 id="products">Доступные продукты</h2>
+
+<table>
+    <tr><th>ID</th><th>Название</th></tr>
+    <tr><td><code>parts-resource-guide</code></td><td>Parts.Resource</td></tr>
+    <tr><td><code>parts-intellect-guide</code></td><td>Parts.Intellect (руководство)</td></tr>
+    <tr><td><code>parts-intellect-pos</code></td><td>Parts.Intellect (POS)</td></tr>
+    <tr><td><code>delivery-schedule</code></td><td>График поставок</td></tr>
+    <tr><td><code>service-api</code></td><td>Service API</td></tr>
+</table>
+
+<hr>
+
+<h2>OpenAPI</h2>
+<p>Полная спецификация доступна в файле <code>openapi.yaml</code>.</p>
+
+</body>
+</html>

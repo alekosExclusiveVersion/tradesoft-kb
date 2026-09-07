@@ -160,7 +160,7 @@ raw query
 ### 3.4 Исправление раскладки (`layout.py`) и fallback в гибриде
 
 Коррекция раскладки ЙЦУКЕН→Cyrillic используется **как fallback** в
-`search_hybrid` (см. раздел 5.6) и в eval-сервере `/api/hybrid`: только когда
+`search_hybrid` (см. раздел 5.6) и в eval-сервере `/api/search`: только когда
 основной результат слабый (пустой или низкое покрытие) и запрос похож на
 кириллицу, набранную в латинской раскладке. `_layout_variant(query)` эмулирует
 исправленную кириллицу; порог кириллических символов задаётся в `layout.py`.
@@ -511,18 +511,19 @@ rrf[k] += rank_model.weight_adjustment(features[k])   #  Σ wi·fi
 | Метод | Путь | Назначение |
 |-------|------|------------|
 | `GET` | `/`, `/index.html`, `/hybrid`, `/hybrid.html` | Страница hybrid-поиска |
-| `GET` | `/api/hybrid?q=...&top=10` | Гибридный поиск для UI (через `run_compare()`) |
-| `GET` | `/api/hybrid?q=...&top=10` | Гибридный поиск для UI (через `run_compare()`) |
+| `GET` | `/api/search?q=...&top=10` | Гибридный поиск для UI |
 | `GET` | `/api/v1/search?q=...&mode=hybrid&top=10&product=...` | Универсальный поиск API v1 |
 | `GET` | `/api/v1/products` | Список продуктов |
-| `GET` | `/api/v1/document?product=...&page=...&chars=30000` | Просмотр документа |
+| `GET` | `/api/v1/products/{id}/pages` | Список страниц продукта |
+| `GET` | `/api/v1/document?product=...&page=...&format=html&chars=30000` | Просмотр документа |
+| `GET` | `/api/v1/index/stats` | Статистика индекса |
 | `GET` | `/api/v1/health` | Статус сервисов (Typesense, Ollama) |
 | `GET` | `/api/compare?q=...&top=5&product=...` | Сравнение FTS vs. vector vs. hybrid |
 | `GET` | `/api/page?product=...&page=...&chars=30000` | Просмотр документа (legacy) |
 | `GET` | `/api/image?product=...&rel=...` | Изображение из документации |
 | `GET` | `/api/access?...` | Логирование кликов и открытий |
 
-### 7.3 Поток поиска в `/api/hybrid`
+### 7.3 Поток поиска в `/api/search`
 
 ```
 Запрос → detect_product_name()
