@@ -435,6 +435,15 @@ def search(terms, product=None, limit=5, snippets=True):
         db.close()
         return [], 0.0
 
+    # Термины-имена продукта (напр. «синхронизатор» в parts-intellect-synch) не
+    # различают релевантность: внутри продукта они встречаются почти везде и
+    # задирают нерелевантные страницы в топ (страница про уведомления опережает
+    # страницу «Выгрузка прайс-листов» только потому, что содержит слово
+    # продукта). Исключаем их из подсчёта совпадений при скорринге.
+    score_terms = [t for t in terms if detect_product_name(t) != product]
+    if not score_terms:
+        score_terms = terms
+
     cond = " AND product=?" if product else ""
     args_extra = [product] if product else []
 
@@ -453,15 +462,44 @@ def search(terms, product=None, limit=5, snippets=True):
     ranked = []
     raw_all = fetch(fts_query(terms, "AND"))
     for r in raw_all:
-        rk = _score_row(r, terms, require_all=True)
+        if not (r[2] or "").strip():
+            continue
+        rk = _score_row(r, score_terms, require_all=True)
         if rk is not None:
             ranked.append(rk + (r[:6],))
 
     if len(ranked) < RECALL_MIN:
         seen = {(x[5][0], x[5][1]) for x in ranked}
+        # Relaxed AND по подмножествам значимых терминов. Нужно из-за морфологии:
+        # стем из запроса (напр. «настроить») не является префиксом словоформ
+        # документа («настройки», «настроек»), поэтому AND по всем терминам
+        # пропускает релевантные страницы, которые ловит vector. Перебираем все
+        # подмножества от большего к меньшему (исключая одиночные) и пробуем
+        # строгий AND по ним. OR-fallback ниже тоже находит их, но с плохим рангом.
+        from itertools import combinations
+        for size in range(len(score_terms) - 1, 1, -1):
+            for sub in combinations(score_terms, size):
+                raw_sub = fetch(fts_query(sub, "AND"))
+                for r in raw_sub:
+                    if not (r[2] or "").strip():
+                        continue
+                    rk = _score_row(r, sub, require_all=True)
+                    if rk is None or (r[0], r[1]) in seen:
+                        continue
+                    seen.add((r[0], r[1]))
+                    ranked.append(rk + (r[:6],))
+                if len(ranked) >= RECALL_MIN:
+                    break
+            if len(ranked) >= RECALL_MIN:
+                break
+
+    if len(ranked) < RECALL_MIN:
+        seen = {(x[5][0], x[5][1]) for x in ranked}
         raw_or = fetch(fts_query(terms, "OR"))
         for r in raw_or:
-            rk = _score_row(r, terms, require_all=False)
+            if not (r[2] or "").strip():
+                continue
+            rk = _score_row(r, score_terms, require_all=False)
             if rk is None or (r[0], r[1]) in seen:
                 continue
             ranked.append(rk + (r[:6],))
@@ -493,7 +531,10 @@ def fallback_like(terms, product, limit):
         args.append(product)
     sql += " LIMIT ?"
     args.append(limit)
-    rows = db.execute(sql, args).fetchall()
+    rows = [
+        r for r in db.execute(sql, args).fetchall()
+        if (r[2] or "").strip()
+    ]
     db.close()
     return rows
 
@@ -963,11 +1004,12 @@ def _hybrid_inner(query, product, limit, snippets, embed_host):
     vec_by_key = {(r[0], r[1]): r for r in vec_rows}
     out = []
     for key in merged:
+        row = None
         if key in fts_by_key:
             row = list(fts_by_key[key])
         elif key in vec_by_key:
             row = list(vec_by_key[key])
-        else:
+        if row is None or not (row[2] or "").strip():
             continue
         pg = key[1]
         if pg in page_products and len(page_products[pg]) > 1:
@@ -1018,6 +1060,8 @@ def vector_main(query, product=None, limit=5, embed_host=None):
 
     rows = []
     for h in vec_hits[:limit]:
+        if not (h.get("title") or "").strip():
+            continue
         rows.append((
             h.get("product"), h.get("page"), h.get("title") or "",
             h.get("path"), "", h.get("_score", 0),
