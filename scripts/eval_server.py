@@ -22,6 +22,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 HYBRID_PAGE_PATH = os.path.join(SCRIPT_DIR, "hybrid_page.html")
+DEMAND_PAGE_PATH = os.path.join(SCRIPT_DIR, "demand_page.html")
 PRODUCTS_ROOT = os.path.join(os.path.dirname(SCRIPT_DIR), "products")
 
 from search import (  # noqa: E402
@@ -388,6 +389,8 @@ def _hybrid_from_hits(query, fts_rows, vec_hits, product, limit=5):
             row = list(row)
             row[0] = ",".join(page_products[pg])
             row[4] = ""
+        if not (row[2] or "").strip():
+            continue
         out.append(tuple(row))
     if not out:
         return fallback_like(terms(query), product, limit), 0.0
@@ -498,7 +501,7 @@ def run_compare(query: str, top: int, product) -> dict:
 
 
 def run_search_v1(query: str, mode: str = "hybrid", top: int = 10,
-                  product: str | None = None) -> dict:
+                  product: str | None = None, debug: bool = False) -> dict:
     """Унифицированный поиск для API v1.
 
     Возвращает: {ok, query, mode, total, elapsed_ms, services, results:[...]}
@@ -512,6 +515,13 @@ def run_search_v1(query: str, mode: str = "hybrid", top: int = 10,
     top = max(1, min(int(top), 50))
     if not query or not query.strip():
         return {"ok": False, "error": "Пустой запрос"}
+
+    canonical, corrected = _canonical_query(query)
+    correction_type = "typo" if corrected else "none"
+    layout_alt = _layout_variant(query)
+    if layout_alt and correction_type == "none":
+        correction_type = "layout"
+    detected_product = detect_product_name(query)
 
     ts_up, oll_up = service_status()
     t0 = time.perf_counter()
@@ -532,7 +542,12 @@ def run_search_v1(query: str, mode: str = "hybrid", top: int = 10,
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
 
-    return {
+    facets = {}
+    for r in rows:
+        p = r[0] if isinstance(r, (list, tuple)) else r.get("product", "")
+        facets[p] = facets.get(p, 0) + 1
+
+    result = {
         "ok": True,
         "query": query,
         "mode": mode,
@@ -540,8 +555,21 @@ def run_search_v1(query: str, mode: str = "hybrid", top: int = 10,
         "elapsed_ms": round(elapsed_ms, 1),
         "source": source,
         "services": {"typesense": ts_up, "ollama": oll_up},
+        "corrected_query": canonical if corrected else None,
+        "correction_type": correction_type,
+        "detected_product": detected_product,
+        "facets": facets,
         "results": [row_json(r, i) for i, r in enumerate(rows, 1)],
     }
+
+    if debug:
+        result["debug"] = {
+            "canonical": canonical,
+            "layout_alternative": layout_alt,
+            "product_filter": product,
+        }
+
+    return result
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -730,7 +758,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, "text/html; charset=utf-8", f.read())
             return
 
-        if path == "/api/hybrid":
+        if path in ("/demand", "/unsatisfied"):
+            if not os.path.exists(DEMAND_PAGE_PATH):
+                self._send(500, "text/plain; charset=utf-8",
+                           f"Нет файла страницы: {DEMAND_PAGE_PATH}")
+                return
+            with open(DEMAND_PAGE_PATH, encoding="utf-8") as f:
+                self._send(200, "text/html; charset=utf-8", f.read())
+            return
+
+        if path == "/api/search":
             qs = urllib.parse.parse_qs(parsed.query)
             query = (qs.get("q", [""])[0] or "").strip()
             if not query:
@@ -741,7 +778,17 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 top = 10
             try:
-                product = detect_product_name(query)
+                # Явный фильтр продукта из UI (сайдбар «по документациям»).
+                # Пусто/auto — автодетекция по тексту запроса.
+                p_override = (qs.get("product", [""])[0] or "").strip()
+                if p_override and p_override.lower() not in ("auto", "all", "*"):
+                    if p_override not in PRODUCTS:
+                        self._json({"ok": False,
+                                    "error": f"Неизвестный продукт: {p_override}"}, 400)
+                        return
+                    product = p_override
+                else:
+                    product = detect_product_name(query)
                 res = run_compare(query, top, product)
                 result = {
                     "ok": True,
@@ -781,15 +828,71 @@ class Handler(BaseHTTPRequestHandler):
                                      for k, v in PRODUCTS.items()]})
             return
 
+        if path.startswith("/api/v1/products/") and path.endswith("/pages"):
+            product_id = path.split("/")[4]
+            if product_id not in PRODUCTS:
+                self._json({"ok": False, "error": f"Неизвестный продукт: {product_id}"}, 400)
+                return
+            try:
+                db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+                try:
+                    rows = db.execute(
+                        "SELECT page, title, path FROM pages WHERE product=? ORDER BY page",
+                        (product_id,),
+                    ).fetchall()
+                finally:
+                    db.close()
+                self._json({
+                    "ok": True,
+                    "product": product_id,
+                    "product_display": PRODUCTS.get(product_id, product_id),
+                    "total": len(rows),
+                    "pages": [{"page": r[0], "title": r[1], "path": r[2]} for r in rows],
+                })
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 500)
+            return
+
+        if path == "/api/v1/index/stats":
+            try:
+                db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+                try:
+                    total_pages = db.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+                    by_product = db.execute(
+                        "SELECT product, COUNT(*) FROM pages GROUP BY product ORDER BY COUNT(*) DESC"
+                    ).fetchall()
+                    last_modified = db.execute(
+                        "SELECT MAX(mtime) FROM pages"
+                    ).fetchone()[0]
+                finally:
+                    db.close()
+                ts_up, oll_up = service_status()
+                self._json({
+                    "ok": True,
+                    "total_pages": total_pages,
+                    "by_product": {r[0]: r[1] for r in by_product},
+                    "last_modified": last_modified,
+                    "services": {"typesense": ts_up, "ollama": oll_up},
+                    "db_path": DB_PATH,
+                    "db_size_bytes": os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0,
+                })
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 500)
+            return
+
         if path == "/api/v1/document":
             qs = urllib.parse.parse_qs(parsed.query)
             product = qs.get("product", [""])[0] or None
             page = qs.get("page", [""])[0] or None
+            fmt = qs.get("format", ["html"])[0] or "html"
             if not product or not page:
                 self._json({"ok": False, "error": "Нужны product и page"}, 400)
                 return
             if product not in PRODUCTS:
                 self._json({"ok": False, "error": f"Неизвестный продукт: {product}"}, 400)
+                return
+            if fmt not in ("html", "markdown"):
+                self._json({"ok": False, "error": f"Неизвестный формат: {fmt}. Допустимые: html, markdown"}, 400)
                 return
             try:
                 chars = max(0, min(int(qs.get("chars", ["30000"])[0]), 200000))
@@ -798,6 +901,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 _p = run_page(product, page, chars)
                 self._emit_open(product, page)
+                if fmt == "markdown":
+                    _p.pop("content_html", None)
+                else:
+                    _p.pop("content", None)
                 self._json(_p)
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 500)
@@ -807,20 +914,19 @@ class Handler(BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             query = (qs.get("q", [""])[0] or "").strip()
             mode = qs.get("mode", ["hybrid"])[0] or "hybrid"
+            debug = qs.get("debug", ["0"])[0] in ("1", "true", "yes")
             try:
                 top = max(1, min(int(qs.get("top", ["10"])[0]), 50))
             except ValueError:
                 top = 10
             product = qs.get("product", [""])[0] or None
-            r = run_search_v1(query, mode, top, product)
+            r = run_search_v1(query, mode, top, product, debug=debug)
             self._last_n = r.get("total", 0)
             try:
-                from search import _canonical_query
-                canonical, changed = _canonical_query(query)
                 self._emit_search(
-                    q_raw=query, q_canonical=canonical,
-                    corrected_type="typo" if changed else "none",
-                    product_detected=detect_product_name(query),
+                    q_raw=query, q_canonical=r.get("corrected_query") or query,
+                    corrected_type=r.get("correction_type", "none"),
+                    product_detected=r.get("detected_product"),
                     product_filter=product, n_results=r.get("total", 0),
                     top10_pp=[f"{x.get('product')}__{x.get('page')}"
                               for x in (r.get("results") or [])[:10]],
@@ -1032,6 +1138,7 @@ class Handler(BaseHTTPRequestHandler):
             "top_products": lambda: _al.top_products(hours, limit),
             "sessions": lambda: _al.sessions(hours, limit),
             "success": lambda: _al.success_metrics(hours),
+            "unsatisfied": lambda: _al.unsatisfied(hours, limit),
             "raw": lambda: _al.raw(hours, limit),
         }
         fn = handlers.get(op)
