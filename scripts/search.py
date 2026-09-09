@@ -434,7 +434,12 @@ def _score_row(r, terms, require_all):
         1 for t in terms if any(w.startswith(t) for w in title_words)
     )
     ph = phrase_hits(all_words, terms)
-    return (-matched, -ph, -title_hits, score, span)
+    # Структура ключа: matched > полный охват заголовка (title_hits) > смежность в
+    # тексте (ph). Совпадение терминов в ЗАГОЛОВКЕ важнее случайной фразовой
+    # близости в тексте: иначе «Подключение нового поставщика…» в тексте SMS-
+    # сервиса (ph=2, title_hits=1) обгоняет «Мастер подключения веб-поставщика»
+    # (ph=1, title_hits=2).
+    return (-matched, -title_hits, -ph, score, span)
 
 
 def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
