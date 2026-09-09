@@ -52,6 +52,31 @@ def _strip_vowel(word: str) -> str:
 
 _RE_WORD = re.compile(r"[\wа-яё]+", re.I)
 
+# Глагольные окончания: инфинитив/возвратные формы pymorphy3 приводит к
+# инфинитиву («настроить»), тогда как существительные/причастия («настройки»,
+# «настроенный») — к другим нормальным формам. Из-за этого префиксный матч
+# «настроить» не находит страницы со словоформами «настройк*». Срезаем
+# глагольное окончание (и одну гласную-глиссу), оставляя общий корень-префикс:
+# настроить -> настро, подключить -> подключ, выгрузить -> выгруз.
+_VERB_SUFFIXES = ("ться", "тись", "чься", "ти", "ть", "чь")
+
+
+def _strip_verb(word: str) -> str:
+    base = word
+    for suff in _VERB_SUFFIXES:
+        if not word.endswith(suff):
+            continue
+        base = word[: -len(suff)]
+        if len(base) < _MIN_ROOT:
+            base = word
+            break
+        for gl in "аяуюеио":
+            if base.endswith(gl) and len(base) - 1 >= _MIN_ROOT:
+                base = base[: -1]
+                break
+        return base
+    return base
+
 
 def stem_word(word: str) -> str:
     """Возвращает корень-префикс для слова (fallback — нижний регистр)."""
@@ -70,6 +95,9 @@ def stem_word(word: str) -> str:
         norm = w
     if not norm or not re.search("[а-яё]", norm):
         return norm or w
+    verb_stem = _strip_verb(norm)
+    if verb_stem != norm:
+        return verb_stem
     return _strip_vowel(norm)
 
 
