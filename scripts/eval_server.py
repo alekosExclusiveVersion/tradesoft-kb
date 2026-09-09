@@ -341,7 +341,7 @@ def row_json(row, rank: int) -> dict:
     }
 
 
-RRF_K = 60  # дублируем из search.py для оффлайн-merge
+RRF_K = 40  # дублируем из search.py для оффлайн-merge
 
 
 def _hybrid_from_hits(query, fts_rows, vec_hits, product, limit=5):

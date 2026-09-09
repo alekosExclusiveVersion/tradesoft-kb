@@ -17,7 +17,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KB_ROOT = os.path.dirname(SCRIPT_DIR)
 DB_PATH = os.path.join(KB_ROOT, "cache", "kb_index.db")
 
-RRF_K = 60
+RRF_K = 40
 RRF_TOP = 30
 RECALL_MIN = 2  # если строгий AND-поиск даёт меньше — подключаем OR-fallback для recall
 
