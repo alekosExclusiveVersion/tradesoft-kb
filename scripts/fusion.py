@@ -49,6 +49,9 @@ CHANGELOG_RRF_PENALTY = 0.035
 # совпадение номера версии: «…версия 6.74» -> versiya_6_74). Выше штрафа
 # changelog, чтобы обходить отрицательный вклад пенализации.
 VERSION_MATCH_BONUS = 0.08
+# Доля max-агрегации ног: 0.0 = чистая сумма (старая), 1.0 = чистое max
+# (FUSION_MAX * min(f,v) вычитается из суммы при f,v>0).
+FUSION_MAX = 0.25
 RBUF_TOP_N = 30  # сколько векторных хитов участвует в слиянии
 
 
@@ -99,6 +102,8 @@ def fuse(query, fts_rows, vec_hits, product=None):
         k = (r[0], r[1])
         add(k, i)
         order[k] = i
+    fts_rrf = dict(rrf)
+    vec_delta_total = {}
 
     for i, h in enumerate(vec_hits[:RBUF_TOP_N]):
         k = (_vk(h, "product"), _vk(h, "page"))
@@ -107,7 +112,9 @@ def fuse(query, fts_rows, vec_hits, product=None):
             eff = max(0, i - boost) if _page_has_terms(k[0], k[1], rare) \
                 else i + boost
         vec_w = VEC_API_WEIGHT if "api" in norm else 1.0
-        rrf[k] = rrf.get(k, 0.0) + vec_w / (RRF_K + eff + 1)
+        vec_rrf = vec_w / (RRF_K + eff + 1)
+        rrf[k] = rrf.get(k, 0.0) + vec_rrf
+        vec_delta_total[k] = vec_delta_total.get(k, 0.0) + vec_rrf
         order.setdefault(k, 0)
         vec_rank[k] = eff
         sc = _vk(h, "_score") or 0.0
@@ -116,6 +123,16 @@ def fuse(query, fts_rows, vec_hits, product=None):
             rrf[k] = rrf.get(k, 0.0) + API_RRF_BONUS
         if k not in order:
             order[k] = len(fts_rows) + i
+
+    # Max-агрегация ног вместо суммы: страница, лидирующая в ОДНОЙ ноге с
+    # высоким рангом, ценнее, чем сумма двух средних рангов («куда перечисляется
+    # выручка»: вектор-топ1 dvizhenie_deneg проигрывает кандидату, найденному в
+    # середине обеих ног). Коэффициент FUSION_MAX — доля max против суммы.
+    if FUSION_MAX > 0.0:
+        for k in list(rrf):
+            if k in fts_rrf and k in vec_delta_total:
+                f, v = fts_rrf[k], vec_delta_total[k]
+                rrf[k] = f + v - FUSION_MAX * min(f, v)
 
     # Историко-измененные продукты — понижение суммарного RRF (не вытесняют
     # реальные страницы руководств для общих запросов).
