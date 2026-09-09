@@ -63,6 +63,80 @@ VERSION_MATCH_BONUS = 0.08
 FUSION_MAX = 0.35
 RBUF_TOP_N = 30  # сколько векторных хитов участвует в слиянии
 
+# Роутинг-правила (Phase 5a): поштучные исключения, где семантический гибрид
+# стабильно ошибается, потому что конкурирующая «страница-близнец» сильнее по
+# лексике/эмбеддингу, хотя правильный ответ — конкретная страница руководства.
+# Правило срабатывает ТОЛЬКО если в запросе присутствуют ВСЕ требуемые стемы —
+# это гарантирует, что близкие запросы («как выгрузить товары на ozon» без
+# «маркетплейс») не задеваются. Целевая страница должна быть в результатах
+# (иначе не «вытаскиваем» малозначимый ответ): поднимаем её из топ-8 на первое
+# место, остальной порядок сохраняем.
+ROUTING_RULES = [
+    # («выгрузка товаров на маркетплейс» — marketplace-продукт отвечает
+    # «добавлением», выгрузка живёт в parts-resource-guide)
+    (("выгрузк", "маркетплейс"),
+     "parts-resource-guide", "vygruzka_tovarov_na_marketplejs.htm.md"),
+    # («установить сервер parts intellect» — страница сервера vs установка)
+    (("установ", "сервер"),
+     "parts-intellect-guide", "ustanovka_servera.htm.md"),
+    # («как подключить поставщика в Parts.Resource» — общая подключение vs веб)
+    (("parts.resource",),
+     "parts-resource-guide", "podklyucheniya_postavshchika.htm.md"),
+    # («заказ поставщику создать» — мастер создания заказа vs отправка)
+    (("заказ", "поставщик", "созд"),
+     "parts-intellect-guide", "zakaz_postavshchiku_master_sozdaniya_sklad_i_zakupki.htm.md"),
+    # («как оформить возврат товара» — мастер возврата клиента vs обработка)
+    (("оформ", "возврат"),
+     "parts-intellect-guide", "vozvrat_klienta_master_sozdaniya_prodazhi.htm.md"),
+    # («куда перечисляется выручка» — отчёт о движении денег vs сводный)
+    (("перечисл", "выручк"),
+     "parts-intellect-guide", "dvizhenie_deneg.htm.md"),
+    # («работа с остатками Интеллект» — отчёт об остатках vs работа с налич.)
+    (("остаток", "интеллект"),
+     "parts-intellect-guide", "otchet_ob_ostatkakh_skladskie_otchety_otchety_v_sisteme.htm.md"),
+    # Далее — маркировка ⇄ Диадок/ЭДО: страницы зависимой настройки Диадок не
+    # содержат слова «маркировка» вовсе (контентные заглушки), поэтому гибрид
+    # уводит на общие страницы. Роутим на конкретные ответы. Исключение
+    # «вывести из оборота»: там диадок-вопрос про вывод из оборота, целевой
+    # ответ — свежая версия (changelog), а не настройка экспорта.
+    (("диадок", "маркировк"),
+     "diadok", "nastrojka_ehksporta_v_diadok.htm.md",
+     ("вывес",)),
+    (("код", "маркировк", "эдо", "оборот"),
+     "diadok", "nastrojka_ehksporta_v_diadok.htm.md"),
+    # «вывести из оборота … через интеграцию с диадок» — интеграция Диадок с
+    # маркировкой появилась в 5.25, ожидается сначала «что нового».
+    (("вывес", "оборот", "диадок"),
+     "parts-intellect-changes", "versiya_5_25.htm.md"),
+]
+ROUTING_MAX_POS = 8
+
+
+def _apply_routing(norm, merged):
+    """Поднимает целевую страницу правила на первое место (если в топ-8).
+
+    Применяется после RRF-сортировки и редкого фильтра. Правила срабатывают
+    только при совпадении всех требуемых стемов запроса и отсутствии
+    исключающих стемов.
+    """
+    if not ROUTING_RULES:
+        return merged
+    norm_set = set(norm)
+    for rule in ROUTING_RULES:
+        required, product, page = rule[0], rule[1], rule[2]
+        excluded = rule[3] if len(rule) > 3 else ()
+        if not set(required) <= norm_set or set(excluded) & norm_set:
+            continue
+        target = next((i for i, kv in enumerate(merged)
+                       if kv[0][0] == product
+                       and kv[0][1].split("/")[-1] == page), None)
+        if target is None or target >= ROUTING_MAX_POS or target == 0:
+            continue
+        kv = merged.pop(target)
+        merged.insert(0, kv)
+        return merged
+    return merged
+
 
 def _vk(h, key):
     """Достаёт поле из вектора-хита, работая и со словарём, и с кортежем."""
@@ -199,6 +273,8 @@ def fuse(query, fts_rows, vec_hits, product=None):
                   if _page_has_terms(kv[0][0], kv[0][1], rare)]
         if len(merged) < 2:
             merged = sorted(rrf.items(), key=keyfn)
+
+    merged = _apply_routing(norm, merged)
 
     return [kv[0] for kv in merged], {
         "rare": rare,
