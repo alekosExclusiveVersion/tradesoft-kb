@@ -45,6 +45,10 @@ FEAT_DIM = len(FEAT_NAMES)
 # когда продукт назван явно или подходящих руководств нет.
 CHANGELOG_PRODUCTS = {"parts-resource-changes", "parts-intellect-changes"}
 CHANGELOG_RRF_PENALTY = 0.035
+# Бонус странице, чей слэг содержит ВСЕ цифровые токены запроса (точное
+# совпадение номера версии: «…версия 6.74» -> versiya_6_74). Выше штрафа
+# changelog, чтобы обходить отрицательный вклад пенализации.
+VERSION_MATCH_BONUS = 0.08
 RBUF_TOP_N = 30  # сколько векторных хитов участвует в слиянии
 
 
@@ -118,6 +122,18 @@ def fuse(query, fts_rows, vec_hits, product=None):
     for k in rrf:
         if k[0] in CHANGELOG_PRODUCTS:
             rrf[k] = rrf.get(k, 0.0) - CHANGELOG_RRF_PENALTY
+    # Точное совпадение версии: если в запросе есть цифровые токены (6.74 -> 6,74)
+    # и слэг страницы содержит ровно их («versiya_6_74»), странице верится больше
+    # всех семантических соседей («версия 6.70» семантически близка к «6.74», но
+    # не релевантна). Эмбеддинг «смазывает» номера версий — это компенсируем
+    # объективным совпадением.
+    query_digits = {t for t in norm if t.isdigit()}
+    if query_digits:
+        import re as _re_digits
+        for k in rrf:
+            slug_digits = set(_re_digits.findall(r"\d+", k[1]))
+            if query_digits <= slug_digits:
+                rrf[k] = rrf.get(k, 0.0) + VERSION_MATCH_BONUS
 
     # --- Самообучающееся ранжирование --------------------------------------
     # Признаки результата + аддитивная поправка от обученных весов (см.
