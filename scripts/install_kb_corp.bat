@@ -7,14 +7,14 @@ rem  For Windows users (run as administrator)
 rem ============================================================
 rem
 rem  Script:
-rem   1) adds "10.182.174.97 kb.tradesoft.corp" to C:\Windows\System32\drivers\etc\hosts
+rem   1) adds "192.168.128.56 kb.tradesoft.corp" to C:\Windows\System32\drivers\etc\hosts
 rem   2) imports self-signed cert kb.tradesoft.corp.crt (next to this .bat)
 rem      into the current user's trusted root store
 rem   3) opens https://kb.tradesoft.corp/ in the browser
 rem ============================================================
 
 set "HOSTS_FILE=C:\Windows\System32\drivers\etc\hosts"
-set "HOST_LINE=10.182.174.97 kb.tradesoft.corp"
+set "HOST_LINE=192.168.128.56 kb.tradesoft.corp"
 set "CERT_FILE=%~dp0kb.tradesoft.corp.crt"
 set "SITE_URL=https://kb.tradesoft.corp/"
 

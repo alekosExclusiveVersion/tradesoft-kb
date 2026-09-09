@@ -11,11 +11,11 @@ rem    - b24.search               (Bitrix24 CRM search)
 rem    - ts-b24-knowledge.search  (Solutions KB)
 rem
 rem  All services are reverse-proxied through nginx on the Mac
-rem  at IP 10.182.174.97.
+rem  at IP 192.168.128.56.
 rem ============================================================
 
 set "HOSTS_FILE=C:\Windows\System32\drivers\etc\hosts"
-set "MAC_IP=10.182.174.97"
+set "MAC_IP=192.168.128.56"
 set "CERT_DIR=%~dp0certs"
 
 rem ---- hosts entries (hostname -> IP) ----
