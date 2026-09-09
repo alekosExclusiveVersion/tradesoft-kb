@@ -405,12 +405,14 @@ def load_chunks(product, page, max_chars=None):
     return "".join(out)
 
 
-def _score_row(r, terms, require_all):
+def _score_row(r, terms, require_all, min_hits=None):
     """Скорит один FTS-чанк. require_all=True — нужны ВСЕ термины; иначе — частичное
-    совпадение (напр. минимум 2), чтобы поднять recall. Возвращает None, если
-    чанк не подходит под условие. Работает по СТЕМОВОЙ паре строк (title_stem,
-    content_stem из stems_fts), чтобы «новый» матчил «нового/новые», а «настро-*»
-    покрывал «настройки/настроить»."""
+    совпадение (не меньше min_hits, по умолч. RECALL_MIN), чтобы поднять recall.
+    Возвращает None, если чанк не подходит под условие. Работает по СТЕМОВОЙ паре
+    строк (title_stem, content_stem из stems_fts), чтобы «новый» матчил
+    «нового/новые», а «настро-*» покрывал «настройки/настроить»."""
+    if min_hits is None:
+        min_hits = RECALL_MIN
     _, page, title, _, _, score, content, title_stem = r
     all_words = word_positions(title_stem) + word_positions(content)
     title_words = word_positions(title_stem)
@@ -424,7 +426,7 @@ def _score_row(r, terms, require_all):
             continue
         first[t] = min(hits)
         matched += 1
-    if not require_all and matched < RECALL_MIN:
+    if not require_all and matched < min_hits:
         return None
     if first:
         span = max(first.values()) - min(first.values())
@@ -458,13 +460,14 @@ def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
     # задирают нерелевантные страницы в топ (страница про уведомления опережает
     # страницу «Выгрузка прайс-листов» только потому, что содержит слово
     # продукта). Исключаем их из подсчёта совпадений при скорринге.
-    # При product=None (кросс-продуктовый поиск) имя продукта, наоборот,
-    # дискриминирует (запрос «тсд» должен продвигать страницы tsd-продукта),
-    # поэтому там оставляем прежнее поведение: в скоринг попадают только имена.
-    # Если по ним результат пуст (напр. «как подключить поставщика в
-    # Parts.Resource» — страница не содержит токенов parts-resource), делаем
-    # один повтор с расширенным набором терминов (_expand_names=True).
-    score_terms = [t for t in terms if detect_product_name(t) != product]
+    # При product=None (кросс-продуктовый поиск) ранжируем по ВСЕМ терминам:
+    # частичное детектирование имени (напр. «resource» -> parts-resource-guide)
+    # не должно сужать скоринг до одного токена — иначе относительный вес
+    # смежных терминов теряется.
+    if product is None:
+        score_terms = terms
+    else:
+        score_terms = [t for t in terms if detect_product_name(t) != product]
     if not score_terms or _expand_names:
         score_terms = terms
 
@@ -525,7 +528,7 @@ def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
         for r in raw_or:
             if not (r[2] or "").strip():
                 continue
-            rk = _score_row(r, score_terms, require_all=False)
+            rk = _score_row(r, score_terms, require_all=False, min_hits=1)
             if rk is None or (r[0], r[1]) in seen:
                 continue
             ranked.append(rk + (r[:6],))
