@@ -424,7 +424,7 @@ def _score_row(r, terms, require_all):
     return (-matched, -ph, -title_hits, score, span)
 
 
-def search(terms, product=None, limit=5, snippets=True):
+def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
     if not os.path.exists(DB_PATH):
         sys.exit(f"Индекс не найден: {DB_PATH}. Запустите scripts/build_index.py")
     db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
@@ -440,8 +440,14 @@ def search(terms, product=None, limit=5, snippets=True):
     # задирают нерелевантные страницы в топ (страница про уведомления опережает
     # страницу «Выгрузка прайс-листов» только потому, что содержит слово
     # продукта). Исключаем их из подсчёта совпадений при скорринге.
+    # При product=None (кросс-продуктовый поиск) имя продукта, наоборот,
+    # дискриминирует (запрос «тсд» должен продвигать страницы tsd-продукта),
+    # поэтому там оставляем прежнее поведение: в скоринг попадают только имена.
+    # Если по ним результат пуст (напр. «как подключить поставщика в
+    # Parts.Resource» — страница не содержит токенов parts-resource), делаем
+    # один повтор с расширенным набором терминов (_expand_names=True).
     score_terms = [t for t in terms if detect_product_name(t) != product]
-    if not score_terms:
+    if not score_terms or _expand_names:
         score_terms = terms
 
     cond = " AND product=?" if product else ""
@@ -511,6 +517,8 @@ def search(terms, product=None, limit=5, snippets=True):
 
     if not rows:
         rows = fallback_like(terms, product, limit)
+    if not rows and not product and not _expand_names:
+        rows, _ = search(terms, product=product, limit=limit, snippets=snippets, _expand_names=True)
     return rows, elapsed
 
 
