@@ -958,8 +958,12 @@ def _result_term_coverage(query, rows):
     ) / len(stems)
 
 
-def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
+def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
+                  with_meta=False):
     """Гибридный поиск с распознаванием продукта и исправлением раскладки.
+
+    with_meta: дополнительно возвращать meta из fuse ((rows, elapsed, meta)).
+    Для боевых вызовов контракт прежний — (rows, elapsed).
 
     - Если в запросе явно назван продукт («Parts.Resource», «Интеллект» и пр.)
       и product не задан — поиск ограничивается только этим продуктом.
@@ -989,7 +993,7 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
         rows, elapsed = vector_main(query, product, limit, embed_host)
         return rows, elapsed
 
-    rows, elapsed = _hybrid_inner(query, product, limit, snippets, embed_host)
+    rows, elapsed, meta = _hybrid_inner(query, product, limit, snippets, embed_host)
 
     # Wide-fallback: если автодетектированный продукт сузил поиск, а результат
     # слабый (мало терминов в топе), повторяем по ВСЕМ продуктам и, если он
@@ -1001,10 +1005,12 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
             and not web_payment and rows):
         det_cov = _result_term_coverage(query, rows)
         if det_cov < 1.0:
-            wide_rows, _ = _hybrid_inner(query, None, limit, snippets, embed_host)
+            wide_rows, _, wide_meta = _hybrid_inner(
+                query, None, limit, snippets, embed_host)
             wide_cov = _result_term_coverage(query, wide_rows) if wide_rows else 0.0
             if wide_cov > det_cov:
                 rows = wide_rows
+                meta = wide_meta
 
     # Fallback по раскладке: только когда результат слабый (пустой или шумный).
     if product is None and rows:
@@ -1016,26 +1022,33 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
             and (not rows or primary_cov < 0.34)):
         alt = _layout_variant(query)
         if alt:
-            alt_rows, _ = _hybrid_inner(alt, None, limit, snippets, embed_host)
+            alt_rows, _, alt_meta = _hybrid_inner(alt, None, limit, snippets, embed_host)
             if alt_rows:
                 alt_cov = _result_coverage(alt, alt_rows)
                 if not rows:
+                    if with_meta:
+                        return alt_rows, elapsed, alt_meta
                     return alt_rows, elapsed
                 if alt_cov >= primary_cov + 0.34:
+                    if with_meta:
+                        return alt_rows, elapsed, alt_meta
                     return alt_rows, elapsed
+    if with_meta:
+        return rows, elapsed, meta
     return rows, elapsed
 
 
 def _hybrid_inner(query, product, limit, snippets, embed_host):
-    """Собственно слияние FTS5 + vector для одного запроса/продукта."""
+    """Собственно слияние FTS5 + vector для одного запроса/продукта.
+    Возвращает (rows, elapsed_ms, meta): meta из fuse (с фичами результатов)."""
     try:
         import embed
         from typesense_client import vector_search
     except ImportError:
-        return search(terms(query), product, limit, snippets)
+        return search(terms(query), product, limit, snippets), 0.0, None
 
     if not embed.ollama_is_available(host=embed_host):
-        return search(terms(query), product, limit, snippets)
+        return search(terms(query), product, limit, snippets), 0.0, None
 
     t0 = time.perf_counter()
     norm_terms = normalize_terms(terms(query))
@@ -1103,8 +1116,8 @@ def _hybrid_inner(query, product, limit, snippets, embed_host):
 
     if not out:
         # fallback
-        return fallback_like(terms(query), product, limit), elapsed
-    return out, elapsed
+        return fallback_like(terms(query), product, limit), 0.0, meta
+    return out, elapsed, meta
 
 
 def terms(query):
