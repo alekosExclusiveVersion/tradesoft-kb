@@ -60,7 +60,7 @@ CHANGELOG_RRF_PENALTY = 0.035
 VERSION_MATCH_BONUS = 0.08
 # Доля max-агрегации ног: 0.0 = чистая сумма (старая), 1.0 = чистое max
 # (FUSION_MAX * min(f,v) вычитается из суммы при f,v>0).
-FUSION_MAX = 0.25
+FUSION_MAX = 0.35
 RBUF_TOP_N = 30  # сколько векторных хитов участвует в слиянии
 
 
