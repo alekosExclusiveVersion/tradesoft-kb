@@ -305,7 +305,17 @@ def normalize_terms(terms):
         t = t.strip().strip('"').lower()
         if t in STOPWORDS or len(t) < 2:
             continue
-        for part in t.replace("-", " ").split():
+        parts0 = t.replace("-", " ").split()
+        for part in parts0:
+            # Версионные токены («5.25», «6.74», «1.5.0») в стем-индексе разбиты
+            # токенизатором FTS на отдельные числа, поэтому «5.25» заменяем на
+            # составляющие «5», «25» — иначе строгий AND по «5.25» не находит
+            # страницу (нет токена-префикса «5.25»).
+            if re.fullmatch(r"\d+([.,]\d+)+", part):
+                for sub in re.split(r"[.,]", part):
+                    if sub not in STOPWORDS:
+                        out.append(sub)
+                continue
             if part in STOPWORDS or len(part) < 2:
                 continue
             s = stem_word(part)
@@ -398,13 +408,16 @@ def load_chunks(product, page, max_chars=None):
 def _score_row(r, terms, require_all):
     """Скорит один FTS-чанк. require_all=True — нужны ВСЕ термины; иначе — частичное
     совпадение (напр. минимум 2), чтобы поднять recall. Возвращает None, если
-    чанк не подходит под условие."""
-    _, page, title, _, _, score, content = r
-    words = word_positions(title) + word_positions(content)
+    чанк не подходит под условие. Работает по СТЕМОВОЙ паре строк (title_stem,
+    content_stem из stems_fts), чтобы «новый» матчил «нового/новые», а «настро-*»
+    покрывал «настройки/настроить»."""
+    _, page, title, _, _, score, content, title_stem = r
+    all_words = word_positions(title_stem) + word_positions(content)
+    title_words = word_positions(title_stem)
     first = {}
     matched = 0
     for t in terms:
-        hits = [i for i, w in enumerate(words) if w.startswith(t)]
+        hits = [i for i, w in enumerate(all_words) if w.startswith(t)]
         if not hits:
             if require_all:
                 return None
@@ -418,9 +431,9 @@ def _score_row(r, terms, require_all):
     else:
         span = 10 ** 6
     title_hits = sum(
-        1 for t in terms if any(w.startswith(t) for w in word_positions(title))
+        1 for t in terms if any(w.startswith(t) for w in title_words)
     )
-    ph = phrase_hits(words, terms)
+    ph = phrase_hits(all_words, terms)
     return (-matched, -ph, -title_hits, score, span)
 
 
@@ -455,9 +468,11 @@ def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
 
     def fetch(q):
         sql = (
-            "SELECT product, page, title, path, snippet(chunks_fts, 1, '⟦', '⟧', '…', 24), "
-            "bm25(chunks_fts), content FROM chunks_fts WHERE chunks_fts MATCH ?"
-            + cond
+            "SELECT s.product, s.page, p.title, p.path, '', "
+            "bm25(stems_fts), s.content_stem, s.title_stem "
+            "FROM stems_fts s LEFT JOIN pages p ON p.id = s.rowid "
+            "WHERE stems_fts MATCH ?"
+            + cond.replace("product", "s.product", 1)
             + " ORDER BY rank LIMIT 500"
         )
         return db.execute(sql, [q] + args_extra).fetchall()
@@ -512,6 +527,13 @@ def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
 
     ranked.sort(key=lambda k: k[:5])
     rows = [k[5] for k in ranked[:limit]]
+    if rows and snippets:
+        # Сниппет из stems_fts-матча не формируется FTS (для него строим сами:
+        # по абзацам страницы с подсветкой терминов маркерами ⟦⟧).
+        rows = [
+            (p, pg, ttl, path, smart_snippet(p, pg, score_terms), score)
+            for (p, pg, ttl, path, tmp, score) in rows
+        ]
     elapsed = (time.perf_counter() - t0) * 1000
     db.close()
 

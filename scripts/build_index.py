@@ -38,6 +38,14 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(
     path UNINDEXED,
     chunk UNINDEXED
 );
+CREATE VIRTUAL TABLE stems_fts USING fts5(
+    title_stem,
+    content_stem,
+    product UNINDEXED,
+    page UNINDEXED,
+    path UNINDEXED,
+    chunk UNINDEXED
+);
 """
 
 
@@ -82,7 +90,20 @@ def iter_pages():
 
 
 def rebuild_fts(db):
+    """Полная переиндексация FTS-таблиц (chunks_fts + stems_fts), rowid = pages.id.
+
+    stems_fts хранит морфологические стемы каждого токена (через stem.stem_text):
+    «новый/нового/новые» → один стем «новый», а глагольная пара «настроить/
+    настройки» матчится по префиксу корня «настро-*». Сырые тексты остаются в
+    pages/chunks_fts для сниппетов и bm25-дисплея.
+    """
+    from stem import stem_text
+
+    def stems_of(text: str) -> str:
+        return " ".join(stem_text(text or ""))
+
     db.execute("DROP TABLE IF EXISTS chunks_fts")
+    db.execute("DROP TABLE IF EXISTS stems_fts")
     db.executescript(FTS_SCHEMA)
     rows = db.execute(
         "SELECT id, product, page, title, path, chunk, content FROM pages"
@@ -91,6 +112,11 @@ def rebuild_fts(db):
         "INSERT INTO chunks_fts(rowid, title, content, product, page, path, chunk) "
         "VALUES (?,?,?,?,?,?,?)",
         [(r[0], r[3], r[6], r[1], r[2], r[4], r[5]) for r in rows],
+    )
+    db.executemany(
+        "INSERT INTO stems_fts(rowid, title_stem, content_stem, product, page, path, chunk) "
+        "VALUES (?,?,?,?,?,?,?)",
+        [(r[0], stems_of(r[3]), stems_of(r[6]), r[1], r[2], r[4], r[5]) for r in rows],
     )
 
 
