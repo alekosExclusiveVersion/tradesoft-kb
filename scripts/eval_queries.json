@@ -64,6 +64,8 @@
     {
       "q": "НДС эквайринг",
       "expected": [
+        "parts-intellect-guide__sozdanie_oplaty_po_bankovskoj_karte.htm.md",
+        "parts-intellect-guide__nastrojka_podklyucheniya_ehkvajringa.htm.md",
         "parts-intellect-guide__stavki_nds.htm.md",
         "parts-intellect-guide__logika_podbora_pravil_stavok_nds.htm.md"
       ]
@@ -349,8 +351,10 @@
     {
       "q": "что нового в parts intellect про маркировку и честный знак",
       "expected": [
+        "parts-intellect-changes__versiya_5_19.htm.md",
         "parts-intellect-changes__versiya_5_25.htm.md",
-        "parts-intellect-changes__versiya_5_24.htm.md"
+        "parts-intellect-changes__versiya_5_20.htm.md",
+        "parts-intellect-changes__versiya_5_16.htm.md"
       ]
     },
     {
