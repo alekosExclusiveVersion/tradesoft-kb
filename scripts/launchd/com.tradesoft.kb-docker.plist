@@ -17,6 +17,13 @@
     <string>/Users/aleksei/Work/tradesoft-kb/deploy-windows</string>
     <key>RunAtLoad</key>
     <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>StandardOutPath</key>
     <string>/tmp/kb-docker.log</string>
     <key>StandardErrorPath</key>

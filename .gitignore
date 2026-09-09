@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 scripts/.venv/
 .DS_Store
+deploy-windows/data/
 
 # Генерируемые отчёты (вывод evaluate.py и HTML-отчёты) — регенерируются скриптами
 REPORT.html
