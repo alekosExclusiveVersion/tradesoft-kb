@@ -19,6 +19,11 @@ import rank_model  # noqa: E402
 
 API_PRODUCTS = {"service-api", "parts-resource-rest-api"}
 API_RRF_BONUS = 0.02
+# API-запросы («…по api», «service api») — семантически однозначные справочные
+# страницы методов. Эмбеддинг на них точен (векторный топ-1 = искомая страница),
+# а FTS5 путает их между собой по частым словам («заказ клиента» vs «клиент»).
+# Поэтому векторной ноге при api-intent даём больший вес в RRF-сумме.
+VEC_API_WEIGHT = 3.0
 
 # --- Самообучающееся ранжирование -------------------------------------------
 # Порядок признаков результата (должен совпадать с rank_train.py и
@@ -72,7 +77,7 @@ def fuse(query, fts_rows, vec_hits, product=None):
     boost = 12 if rare else 0
 
     det = detect_products(query)
-    api_intent = bool(det and det[0][0] in API_PRODUCTS)
+    api_intent = bool(det and det[0][0] in API_PRODUCTS) or "api" in norm
     detected_product = det[0][0] if det else None
 
     rrf, order = {}, {}
@@ -97,7 +102,9 @@ def fuse(query, fts_rows, vec_hits, product=None):
         if boost:
             eff = max(0, i - boost) if _page_has_terms(k[0], k[1], rare) \
                 else i + boost
-        add(k, eff)
+        vec_w = VEC_API_WEIGHT if "api" in norm else 1.0
+        rrf[k] = rrf.get(k, 0.0) + vec_w / (RRF_K + eff + 1)
+        order.setdefault(k, 0)
         vec_rank[k] = eff
         sc = _vk(h, "_score") or 0.0
         vec_score[k] = max(vec_score.get(k, 0.0), sc)
