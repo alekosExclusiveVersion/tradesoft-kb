@@ -18,7 +18,16 @@ from search import (  # noqa: E402
 import rank_model  # noqa: E402
 
 API_PRODUCTS = {"service-api", "parts-resource-rest-api"}
+# REST-справочники, которые подавляем для не-API запросов (parts-index-rest-api —
+# общий индекс методов, тоже тянется к гайд-запросам: «заказ поставщику», «НДС»).
+NON_API_PENALTY_PRODUCTS = API_PRODUCTS | {"parts-index-rest-api"}
 API_RRF_BONUS = 0.02
+# Штраф API-продуктам, когда запрос НЕ про API: для запросов без «api»/метода
+# справочник REST-методов («баланс клиента», «заказ поставщику создать») часто
+# обгоняет страницы руководств по близости эмбеддинга, хотя отвечает документ
+# гайда. API_RRF_BONUS и VEC_API_WEIGHT активны только при api-intent, а здесь
+# наоборот — сдерживаем API-продукты для не-API запросов.
+NON_API_PENALTY = 0.01
 # API-запросы («…по api», «service api») — семантически однозначные справочные
 # страницы методов. Эмбеддинг на них точен (векторный топ-1 = искомая страница),
 # а FTS5 путает их между собой по частым словам («заказ клиента» vs «клиент»).
@@ -139,6 +148,11 @@ def fuse(query, fts_rows, vec_hits, product=None):
     for k in rrf:
         if k[0] in CHANGELOG_PRODUCTS:
             rrf[k] = rrf.get(k, 0.0) - CHANGELOG_RRF_PENALTY
+    # Не-API запросы: справочник методов REST не должен вытеснять гайды.
+    if NON_API_PENALTY > 0.0 and not api_intent:
+        for k in rrf:
+            if k[0] in NON_API_PENALTY_PRODUCTS:
+                rrf[k] = rrf.get(k, 0.0) - NON_API_PENALTY
     # Точное совпадение версии: если в запросе есть цифровые токены (6.74 -> 6,74)
     # и слэг страницы содержит ровно их («versiya_6_74»), странице верится больше
     # всех семантических соседей («версия 6.70» семантически близка к «6.74», но
