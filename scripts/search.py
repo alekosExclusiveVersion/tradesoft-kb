@@ -932,6 +932,32 @@ def _result_coverage(query, rows):
     return hit / min(3, len(rows[:3]))
 
 
+def _result_term_coverage(query, rows):
+    """Какая доля ТЕРМИНОВ запроса присутствует хотя бы в одной из топ-3 страниц.
+
+    Зависит от того, какие термины вообще ввели. Если продукт-детектор сузил
+    поиск, пропущенный термин (напр. «выгрузка» в marketplace-продукте против
+    parts-resource-guide) виден здесь как дыра, хотя «доля результатов с термином»
+    (_result_coverage) остаётся высокой.
+    """
+    if not rows:
+        return 0.0
+    stems = _correct_terms(normalize_terms(terms(query)))
+    if not stems:
+        return 0.0
+
+    def key(r):
+        if isinstance(r, dict):
+            return (r.get("product"), r.get("page"))
+        return (r[0], r[1])
+
+    keys = [key(r) for r in rows[:3]]
+    return sum(
+        1 for t in stems
+        if any(_page_has_terms(k[0], k[1], [t]) for k in keys)
+    ) / len(stems)
+
+
 def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
     """Гибридный поиск с распознаванием продукта и исправлением раскладки.
 
@@ -946,6 +972,7 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
     """
     if product is None:
         product = detect_product_name(query)
+    detected_product = product
     web_payment = False
     if product is None:
         p = web_payment_product(query)
@@ -963,6 +990,21 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None):
         return rows, elapsed
 
     rows, elapsed = _hybrid_inner(query, product, limit, snippets, embed_host)
+
+    # Wide-fallback: если автодетектированный продукт сузил поиск, а результат
+    # слабый (мало терминов в топе), повторяем по ВСЕМ продуктам и, если он
+    # заметно лучше покрывает термины запроса, берём его. Детект ошибочен,
+    # когда имя продукта совпало со словом запроса («выгрузка товаров на
+    # маркетплейс» -> marketplace держит ответ в parts-resource-guide,
+    # «версия 6.74» -> parts-resource-guide скрывает parts-resource-changes).
+    if (detected_product is not None and detected_product == product
+            and not web_payment and rows):
+        det_cov = _result_term_coverage(query, rows)
+        if det_cov < 1.0:
+            wide_rows, _ = _hybrid_inner(query, None, limit, snippets, embed_host)
+            wide_cov = _result_term_coverage(query, wide_rows) if wide_rows else 0.0
+            if wide_cov > det_cov:
+                rows = wide_rows
 
     # Fallback по раскладке: только когда результат слабый (пустой или шумный).
     if product is None and rows:
