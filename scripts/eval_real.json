@@ -1,0 +1,63 @@
+{
+ "note": "Real-log eval 2026-09-10: новые чистые запросы из search_events (kb_access.db), не вошедшие в основной набор. Разметка expected вручную по страницам документации + проверка top-результатов. Длинные запросы про маркировку/ЭДО уже покрыты базовым eval_queries.json.",
+ "queries": [
+  {
+   "q": "автоимопрт заказов",
+   "expected": [
+    "parts-intellect-guide__nastrojka_avtoimporta_zakazov_klientov_s_pochty.htm.md",
+    "parts-intellect-guide__avtoimport_zakazov_klientov.htm.md",
+    "parts-intellect-guide__sozdanie_pravila_avtoimporta_zakazov_klientov.htm.md"
+   ]
+  },
+  {
+   "q": "автомпорт",
+   "expected": [
+    "parts-intellect-guide__nastrojka_avtoimporta_zakazov_klientov_s_pochty.htm.md",
+    "parts-intellect-guide__avtoimport_zakazov_klientov.htm.md",
+    "parts-intellect-guide__avtoimport_prikhodnykh_dokumentov.htm.md"
+   ]
+  },
+  {
+   "q": "эквайринг",
+   "expected": [
+    "parts-intellect-guide__nastrojka_podklyucheniya_ehkvajringa.htm.md",
+    "parts-intellect-guide__oplaty_po_bankovskim_kartam.htm.md",
+    "parts-intellect-guide__sozdanie_oplaty_po_bankovskoj_karte.htm.md"
+   ]
+  },
+  {
+   "q": "касса",
+   "expected": [
+    "parts-resource-guide__onlajn_kassy.htm.md",
+    "parts-intellect-guide__scheta_i_kassy_master_pervichnoj_nastrojki.htm.md",
+    "parts-intellect-guide__scheta_i_kassy_polzovateli_i_dostupy.htm.md",
+    "parts-intellect-guide__dobavlenie_schetov_i_kass.htm.md"
+   ]
+  },
+  {
+   "q": "чек",
+   "expected": [
+    "parts-intellect-guide__algoritm_pechati_chekov_po_tovarnym_dokumentam_raskhodnaya_nakladnaya_i_zakaz_naryad.htm.md",
+    "parts-intellect-guide__algoritm_pechati_chekov_po_iskhodyashchemu_platezhnomu_dokumentu_rko.htm.md",
+    "parts-resource-guide__pechat_cheka_polnogo_rascheta_po_otgruzkam.htm.md"
+   ]
+  },
+  {
+   "q": "как настрить seo на сайте?",
+   "expected": [
+    "seo-guide__pervichnye_nastrojki_sajta.htm.md",
+    "parts-resource-guide__nastrojka_seo_parametrov.htm.md",
+    "seo-guide__master_pervichnoj_nastrojki.htm.md"
+   ]
+  },
+  {
+   "q": "подключить оплаты на сайте через яндекс pay",
+   "expected": [
+    "parts-resource-guide__priem_onlajn_platezhej.htm.md",
+    "parts-resource-guide__nastrojka_sposobov_oplaty.htm.md",
+    "parts-resource-guide__nastrojka_ikonok_platezhnykh_sistem.htm.md",
+    "solution85831"
+   ]
+  }
+ ]
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Telegram-бот для поиска по базе знаний Tradesoft.
+"""Telegram-бот для поиска по базе знаний Tradesoft (unified cross_search).
 
 Запуск:
   export TELEGRAM_BOT_TOKEN="токен от @BotFather"
@@ -11,8 +11,8 @@
   /search <запрос>  — поиск
   <любой текст>     — поиск без команды
 
-Под результатами — кнопки 1–5 открывают полный текст страницы,
-кнопки выбора продукта сужают поиск.
+Результаты объединяют документацию (docs), решения техподдержки (solution)
+и CRM-сделки (crm). Под результатами кнопки 1–N открывают подробно.
 """
 import asyncio
 import os
@@ -30,12 +30,17 @@ from telegram.ext import (
 
 from telegram.request import HTTPXRequest
 
-from search import PRODUCTS, clean_content, clean_snippet, load_chunks, search
+from search import clean_content, clean_snippet, load_chunks
+
+import cross_search
 
 TOP = 5
 MAX_DETAIL_CHARS = 12000
 MSG_LIMIT = 3900
 RETRYABLE = (NetworkError, RetryAfter, TimedOut)
+
+TYPE_LABEL = {"docs": "📄 Документация", "solution": "💡 Решение",
+              "crm": "💼 Сделка"}
 
 
 async def _send(func, *args, retries=4, **kwargs):
@@ -60,38 +65,102 @@ def _esc(text):
     return html.escape(str(text), quote=False)
 
 
-def format_results(rows, elapsed, query, product=None):
+def _split_docs_path(path):
+    """'product__page.htm.md' → (product, page)."""
+    if "__" in path:
+        return tuple(path.split("__", 1))
+    return None, path
+
+
+def _flatten_results(res):
+    """Строит плоский список результатов из ответов cross_search.
+
+    Каждый элемент: dict(kind, product, page, title, snippet, url, extra).
+    """
+    items = []
+    for ans in res.get("answers", []):
+        for b in ans.get("blocks", []):
+            kind = b.get("source", "")
+            title = b.get("title") or ""
+            snippet = clean_snippet(b.get("content") or "", html=True)
+            if kind == "docs":
+                product, page = _split_docs_path(b.get("path") or "")
+                items.append({
+                    "kind": "docs", "product": product or "", "page": page or "",
+                    "title": title, "snippet": snippet,
+                    "url": b.get("url") or "",
+                    "source_urls": ans.get("source_urls") or [],
+                })
+            elif kind == "solution":
+                items.append({
+                    "kind": "solution",
+                    "product": b.get("product") or "", "page": b.get("path") or "",
+                    "title": title, "snippet": snippet,
+                    "url": b.get("url") or "",
+                    "solution_id": b.get("deal_id"),
+                    "source_urls": ans.get("source_urls") or [],
+                })
+            elif kind == "crm":
+                items.append({
+                    "kind": "crm",
+                    "product": "", "page": b.get("path") or "",
+                    "title": title, "snippet": snippet,
+                    "url": b.get("url") or "",
+                    "deal_id": b.get("deal_id"),
+                    "source_urls": ans.get("source_urls") or [],
+                })
+        # Похожие документы/решения из cross-links идут доп. строками
+        for rd in ans.get("related_docs", [])[:1]:
+            path = rd.get("path") or ""
+            product, page = _split_docs_path(path)
+            items.append({
+                "kind": "docs", "product": product or "", "page": page or "",
+                "title": rd.get("title") or "", "snippet": "",
+                "url": "", "related": True, "source_urls": [],
+            })
+        for rs in ans.get("related_solutions", [])[:1]:
+            items.append({
+                "kind": "solution",
+                "product": rs.get("product") or "", "page": f"solution_{rs.get('id')}",
+                "title": rs.get("title") or "", "snippet": "",
+                "url": "", "related": True, "solution_id": rs.get("id"),
+                "source_urls": [],
+            })
+    return items[:TOP]
+
+
+def format_results(items, res, query):
     esc = _esc
     lines = [f"Запрос: <b>{esc(query)}</b>"]
+    product = res.get("product")
     if product:
-        lines.append(f"Продукт: <i>{esc(PRODUCTS[product])}</i>")
-    lines.append(f"Найдено: <b>{len(rows)}</b> · {elapsed:.1f} мс")
-    for i, (product, page, title, path, snippet, _score) in enumerate(rows, 1):
-        name = title or page
+        lines.append(f"Продукт: <i>{esc(product)}</i>")
+    counts = res.get("counts") or {}
+    lines.append(f"Найдено: <b>{len(items)}</b> · {res.get('latency_ms', 0)} мс"
+                 f" · docs {counts.get('docs', 0)} / решения {counts.get('solutions', 0)}")
+    for i, it in enumerate(items, 1):
         lines.append("")
-        lines.append(f"{i}. <b>{esc(name)}</b> — <i>{esc(PRODUCTS.get(product, product))}</i>")
-        if snippet:
-            lines.append(clean_snippet(snippet, html=True))
+        tag = TYPE_LABEL.get(it["kind"], it["kind"])
+        if it.get("related"):
+            tag = "🔗 Связано"
+        name = it["title"] or it["page"]
+        prod = f" — <i>{esc(it['product'])}</i>" if it["product"] else ""
+        lines.append(f"{i}. [{tag}]{prod}\n<b>{esc(name)}</b>")
+        if it["snippet"]:
+            lines.append(esc(snippet_text(it["snippet"])))
     text = "\n".join(lines)
     return text[:4000]
 
 
-def keyboard_for():
-    buttons = [[InlineKeyboardButton(PRODUCTS[p], callback_data=f"p:{p}")]
-               for p in PRODUCTS]
-    buttons.append([InlineKeyboardButton("Все продукты",
-                                         callback_data="p:all")])
-    return InlineKeyboardMarkup(buttons)
+def snippet_text(snippet):
+    """Очищает HTML-сниппет до plain-текста для вывода."""
+    import re
+    return re.sub(r"<[^>]+>", "", snippet)
 
 
 def results_keyboard(n):
-    """Кнопки 1..N (полный текст результата) + выбор продукта."""
     buttons = [[InlineKeyboardButton(str(i), callback_data=f"d:{i}")
                 for i in range(1, n + 1)]]
-    buttons += [[InlineKeyboardButton(PRODUCTS[p], callback_data=f"p:{p}")]
-                for p in PRODUCTS]
-    buttons.append([InlineKeyboardButton("Все продукты",
-                                         callback_data="p:all")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -105,72 +174,99 @@ def detail_keyboard():
     ])
 
 
-def no_results_message(query, product=None):
+def no_results_message(query):
     esc = _esc
-    lines = [f"Запрос: <b>{esc(query)}</b>"]
-    if product:
-        lines.append(f"Продукт: <i>{esc(PRODUCTS[product])}</i>")
-    lines.append("По введенным данным нет результатов.")
-    lines.append("Попробуйте изменить формулировку запроса или укажите продукт.")
-    return "\n".join(lines)
+    return (f"Запрос: <b>{esc(query)}</b>\n"
+            "По введенным данным нет результатов.\n"
+            "Попробуйте изменить формулировку запроса.")
 
 
-async def render_results(context, query, product, target, edit=False):
-    """Показывает список результатов (reply_text или edit_message_text)."""
-    terms = [t for t in query.split() if t]
-    if not terms:
+async def render_results(context, query, target, edit=False):
+    """Единый поиск (cross_search) и показ списка результатов."""
+    if not query.strip():
         return None
-    rows, elapsed = search(terms, product, TOP)
+    res = cross_search.cross_search(query, max_answers=3, limit_per_source=5)
+    items = _flatten_results(res)
     context.chat_data["last_query"] = query
-    context.chat_data["last_product"] = product
-    if not rows:
-        text = no_results_message(query, product)
-        markup = keyboard_for()
+    context.chat_data["last_res"] = res
+    context.chat_data["last_items"] = items
+    if not items:
+        text = no_results_message(query)
+        markup = None
     else:
-        context.chat_data["last_results"] = [
-            (r[0], r[1], r[2] or r[1]) for r in rows
-        ]
-        text = format_results(rows, elapsed, query, product)
-        markup = results_keyboard(len(rows))
+        text = format_results(items, res, query)
+        markup = results_keyboard(len(items))
     if edit:
         await _send(target.edit_message_text, text, reply_markup=markup,
                     parse_mode="HTML")
     else:
         await _send(target.reply_text, text, reply_markup=markup,
                     parse_mode="HTML")
-    return rows
+    return items
 
 
-async def send_detail(message, context, idx):
-    """Полный текст страницы результата idx (0-based), несколькими сообщениями."""
-    results = context.chat_data.get("last_results") or []
-    if not results or not (0 <= idx < len(results)):
-        await _send(message.reply_text, "Результаты не найдены — выполните поиск заново.")
-        return
-    product, page, title = results[idx]
-    context.chat_data["last_detail_idx"] = idx
-    raw = load_chunks(product, page, MAX_DETAIL_CHARS)
+async def _doc_detail_body(item):
+    raw = load_chunks(item["product"], item["page"], MAX_DETAIL_CHARS)
     body = clean_content(raw)
     if len(raw) > MAX_DETAIL_CHARS:
         body = body[:MAX_DETAIL_CHARS].rstrip() + "\n\n…(текст обрезан)"
-    header = f"📄 {title} — {PRODUCTS.get(product, product)} ({idx + 1}/{len(results)})\n\n"
-    if not body:
-        await _send(message.reply_text, header + "Пустая страница.",
-                    reply_markup=detail_keyboard())
+    return body
+
+
+def _solution_detail_body(item):
+    sol = cross_search._get_solutions_source().get_solution(item.get("solution_id"))
+    if not sol:
+        return item.get("snippet") or "Решение не найдено."
+    parts = []
+    if sol["question"]:
+        parts.append("Вопрос:\n" + sol["question"])
+    if sol["resolution"]:
+        parts.append("Решение:\n" + sol["resolution"])
+    return "\n\n".join(parts) or "Решение не найдено."
+
+
+async def send_detail(message, context, idx):
+    """Подробно по результату idx (0-based): полный текст или снаппет."""
+    items = context.chat_data.get("last_items") or []
+    if not items or not (0 <= idx < len(items)):
+        await _send(message.reply_text, "Результаты не найдены — выполните поиск заново.")
         return
-    parts = [(header + body)[i:i + MSG_LIMIT]
-             for i in range(0, len(header + body), MSG_LIMIT)]
+    it = items[idx]
+    context.chat_data["last_detail_idx"] = idx
+    tag = TYPE_LABEL.get(it["kind"], it["kind"])
+    prod = f" ({it['product']})" if it["product"] else ""
+    header = f"{tag}{prod}: <b>{_esc(it['title'] or it['page'])}</b> ({idx + 1}/{len(items)})\n\n"
+
+    if it["kind"] == "docs":
+        try:
+            body = await _doc_detail_body(it)
+        except Exception as e:
+            print(f"[detail-docs] {e}", file=sys.stderr, flush=True)
+            body = it.get("snippet") or ""
+    elif it["kind"] == "solution":
+        try:
+            body = _solution_detail_body(it)
+        except Exception as e:
+            print(f"[detail-solution] {e}", file=sys.stderr, flush=True)
+            body = it.get("snippet") or ""
+    else:
+        body = snippet_text(it.get("snippet") or "")
+
+    if it.get("related"):
+        body = body or it.get("snippet") or "Связанный материал."
+
+    full = header + (body or "Пустая страница.")
+    parts = [full[i:i + MSG_LIMIT] for i in range(0, len(full), MSG_LIMIT)]
     await _send(message.reply_text, parts[0], reply_markup=detail_keyboard())
     for part in parts[1:]:
         await _send(message.reply_text, part)
 
 
-async def run_search(update, context, query, product=None):
-    terms = [t for t in query.split() if t]
-    if not terms:
+async def run_search(update, context, query):
+    if not query.strip():
         await _send(update.effective_message.reply_text, "Пустой запрос.")
         return
-    await render_results(context, query, product, update.effective_message)
+    await render_results(context, query, update.effective_message)
 
 
 async def on_start(update, context):
@@ -187,9 +283,9 @@ async def on_help(update, context):
         "/search <запрос> — поиск по базе знаний\n"
         "любой текст — то же самое, без команды\n\n"
         "Примеры: «передача аналогов», «ставка НДС онлайн касса»,\n"
-        "«API метод JSON», «nastrojka onlajn kassy»\n\n"
-        "Кнопки 1–5 под результатами открывают полный текст страницы.\n"
-        "Кнопки под результатами сужают поиск до конкретного продукта."
+        "«подключить оплаты через яндекс pay»\n\n"
+        "Результаты собираются из документации, решений техподдержки и сделок.\n"
+        "Кнопки 1–N под результатами открывают подробно."
     )
 
 
@@ -218,18 +314,6 @@ async def on_error(update, context):
         pass
 
 
-async def on_product_callback(update, context):
-    q = update.callback_query
-    await q.answer()
-    key = q.data.split(":", 1)[1]
-    query = context.chat_data.get("last_query")
-    if not query:
-        await _send(q.edit_message_text, "Запрос не найден — отправьте новый.")
-        return
-    product = None if key == "all" else key
-    await render_results(context, query, product, q, edit=True)
-
-
 async def on_detail_callback(update, context):
     q = update.callback_query
     await q.answer()
@@ -250,17 +334,16 @@ async def on_nav_callback(update, context):
         if not query:
             await _send(q.edit_message_text, "Запрос не найден — выполните поиск заново.")
             return
-        product = context.chat_data.get("last_product")
-        await render_results(context, query, product, q, edit=True)
+        await render_results(context, query, q, edit=True)
         return
     idx = context.chat_data.get("last_detail_idx", 0)
-    results = context.chat_data.get("last_results") or []
-    if not results:
+    items = context.chat_data.get("last_items") or []
+    if not items:
         await q.answer()
         await _send(q.message.reply_text, "Результаты не найдены — выполните поиск заново.")
         return
     nidx = idx - 1 if act == "prev" else idx + 1
-    if not (0 <= nidx < len(results)):
+    if not (0 <= nidx < len(items)):
         await q.answer(
             "Нет " + ("предыдущего" if act == "prev" else "следующего")
             + " результата", show_alert=True
@@ -314,7 +397,6 @@ def main():
     app.add_handler(CommandHandler("help", on_help))
     app.add_handler(CommandHandler("search", on_search_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    app.add_handler(CallbackQueryHandler(on_product_callback, pattern=r"^p:"))
     app.add_handler(CallbackQueryHandler(on_detail_callback, pattern=r"^d:\d+$"))
     app.add_handler(CallbackQueryHandler(on_nav_callback, pattern=r"^nav:"))
     app.add_error_handler(on_error)

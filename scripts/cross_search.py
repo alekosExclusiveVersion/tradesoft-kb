@@ -150,6 +150,26 @@ class SolutionsSource:
         with self._lock:
             return self._search_unlocked(query, product, limit)
 
+    def get_solution(self, solution_id):
+        """Полный текст случая по id (для глубинного просмотра)."""
+        if not self._conn:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, title, question, resolution, product_display, "
+                "date_create, confidence FROM cases WHERE id = ?",
+                (solution_id,)).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "title": row["title"] or "",
+            "question": row["question"] or "",
+            "resolution": row["resolution"] or "",
+            "product": row["product_display"] or "",
+            "date": row["date_create"] or "",
+        }
+
     def _search_unlocked(self, query, product=None, limit=5):
         tokens = [t for t in query.split() if t][:5]
         if not tokens:
@@ -158,6 +178,8 @@ class SolutionsSource:
         # Use stemmed tokens for better matching
         from intent import stem
         stemmed_tokens = [stem(t) for t in tokens]
+        n_tok = len(stemmed_tokens)
+        max_score = 3.0 * n_tok  # title ×3 per token
 
         # Score-based matching: title > question > resolution
         where = []
@@ -202,13 +224,20 @@ class SolutionsSource:
         for r in rows:
             # Берём первые 500 символов из resolution как snippet
             resolution = (r["resolution"] or "")[:500]
+            # Нормированный скор совпадения (0..1): match_score / (3 × токенов).
+            # Отличает попадание «по заголовку по всем словам» от случайного
+            # совпадения одного стема в резолюции (confidence не подходит).
+            if max_score > 0:
+                norm = (r["match_score"] or 0) / max_score
+            else:
+                norm = r["confidence"] or 0
             results.append({
                 "source": "solution",
                 "path": f"solution_{r['id']}",
                 "product": r["product_display"] or "",
                 "title": r["title"] or "",
                 "content": resolution,
-                "score": r["confidence"] or 0,
+                "score": round(min(1.0, norm), 3),
                 "url": f"https://ts-b24-knowledge.search/api/solution?id={r['id']}",
                 "deal_id": r["id"],
                 "date": r["date_create"] or "",
@@ -288,6 +317,8 @@ class CRMSource:
 class CrossLinksSource:
     """Cross-links между решениями и документацией."""
 
+    _DOCS_INDEX = os.path.join(KB_ROOT, "cache", "kb_index.db")
+
     def __init__(self):
         import threading
         self._lock = threading.RLock()
@@ -298,6 +329,28 @@ class CrossLinksSource:
         self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
                                      check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._docs_conn = None
+        if os.path.exists(self._DOCS_INDEX):
+            try:
+                self._docs_conn = sqlite3.connect(
+                    f"file:{self._DOCS_INDEX}?mode=ro", uri=True,
+                    check_same_thread=False)
+                self._docs_conn.row_factory = sqlite3.Row
+            except Exception:
+                self._docs_conn = None
+
+    def _page_title(self, product, page):
+        """Настоящий заголовок страницы из kb_index.pages."""
+        if not self._docs_conn or not product or not page:
+            return None
+        with self._lock:
+            try:
+                row = self._docs_conn.execute(
+                    "SELECT title FROM pages WHERE product=? AND page=? LIMIT 1",
+                    (product, page)).fetchone()
+            except Exception:
+                return None
+        return row["title"] if row else None
 
     def get_related_docs(self, solution_id, limit=3):
         """Для решения возвращает связанные страницы документации."""
@@ -314,7 +367,17 @@ class CrossLinksSource:
                 """, (str(solution_id), limit)).fetchall()
             except Exception:
                 return []
-        return [dict(r) for r in rows]
+        results = []
+        for r in rows:
+            d = dict(r)
+            path = d.get("doc_path") or ""
+            if "__" in path:
+                prod, _, page = path.partition("__")
+                real_title = self._page_title(prod, page)
+                if real_title:
+                    d["doc_title"] = real_title
+            results.append(d)
+        return results
 
     def get_related_solutions(self, doc_path, limit=3):
         """Для страницы документации возвращает связанные решения."""
@@ -361,12 +424,21 @@ def _normalize_product(source_name, product_name):
     # Solutions format
     if product_name in _SOLUTION_PRODUCT_MAP:
         return _SOLUTION_PRODUCT_MAP[product_name]
-    # Docs format (product prefix)
-    for prefix in ("parts-resource-guide", "parts-intellect-guide",
-                   "parts-intellect-synch", "diadok", "seo-guide",
-                   "delivery_schedule", "wazzup", "tsd", "marketplace"):
+    # Docs format (product prefixes → canonical IDs, одинаковые с решениями)
+    _DOCS_PREFIX_CANONICAL = {
+        "parts-resource-guide": "parts_resource",
+        "parts-intellect-guide": "parts_intellect",
+        "parts-intellect-synch": "sync",
+        "diadok": "diadok",
+        "seo-guide": "seo",
+        "delivery_schedule": "delivery",
+        "wazzup": "wazzup",
+        "tsd": "tsd",
+        "marketplace": "marketplace",
+    }
+    for prefix, canonical in _DOCS_PREFIX_CANONICAL.items():
         if product_name.startswith(prefix):
-            return prefix.replace("-", "_")
+            return canonical
     return product_name
 
 

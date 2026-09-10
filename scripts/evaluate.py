@@ -25,20 +25,37 @@ def hit(expected, product, page):
     return False
 
 
-def run_query(query, mode, limit):
-    """Возвращает (keys_top_down, elapsed_ms)."""
-    t0 = __import__("time").perf_counter()
-    try:
-        if mode == "fts":
-            rows, _ = search(terms(query), None, limit=limit)
-        elif mode == "vector":
-            rows, _ = vector_main(query, None, limit=limit)
-        else:
-            rows, _ = search_hybrid(query, None, limit=limit)
-    except Exception as e:
-        return [], None
-    elapsed = (__import__("time").perf_counter() - t0) * 1000
-    keys = [(r[0], r[1]) for r in rows]
+def run_query(query, mode, limit, timeout_ms=15000):
+    """Возвращает (keys_top_down, elapsed_ms).
+
+    Выполняет поиск в отдельном потоке с таймаутом: зависший запрос
+    (напр. очень длинный эмбеддинг) не должен блокировать весь eval.
+    """
+    import threading
+    holder = [([], None)]
+
+    def _run():
+        t0 = __import__("time").perf_counter()
+        try:
+            if mode == "fts":
+                rows, _ = search(terms(query), None, limit=limit)
+            elif mode == "vector":
+                rows, _ = vector_main(query, None, limit=limit)
+            else:
+                rows, _ = search_hybrid(query, None, limit=limit)
+        except Exception:
+            holder[0] = ([], None)
+            return
+        elapsed = (__import__("time").perf_counter() - t0) * 1000
+        keys = [(r[0], r[1]) for r in rows]
+        holder[0] = (keys, elapsed)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=timeout_ms / 1000.0)
+    keys, elapsed = holder[0]
+    if elapsed is None:
+        print(f"  [timeout] {query[:60]}", file=sys.stderr)
     return keys, elapsed
 
 
@@ -83,12 +100,14 @@ def main():
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--json", default="", help="путь для сохранения JSON-отчёта")
     ap.add_argument("--mode", choices=["fts", "vector", "hybrid"], default=None)
+    ap.add_argument("--file", default="eval_queries.json",
+                    help="файл с эталонными запросами (по умолч. eval_queries.json)")
     args = ap.parse_args()
 
-    qfile = os.path.join(SCRIPT_DIR, "eval_queries.json")
+    qfile = os.path.join(SCRIPT_DIR, args.file)
     data = json.load(open(qfile, encoding="utf-8"))
     queries = data["queries"]
-    print(f"Запросов в эталоне: {len(queries)}\n")
+    print(f"Эталон: {args.file}, запросов: {len(queries)}\n")
 
     modes = [args.mode] if args.mode else ["fts", "vector", "hybrid"]
     results = []
