@@ -36,6 +36,19 @@ mkdir -p "$CACHE_DIR" "$PRODUCTS_DIR" "$LOG_DIR"
 touch "$LOG_FILE"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
+# защита от параллельных запусков (дня нет flock в macOS)
+LOCK_DIR="$CACHE_DIR/fetch.lock.d"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    if [ -f "$LOCK_DIR/pid" ] && kill -0 "$(cat "$LOCK_DIR/pid" 2>/dev/null)" 2>/dev/null; then
+        log "fetch.sh уже выполняется (pid $(cat "$LOCK_DIR/pid" 2>/dev/null)) — пропуск"
+        exit 0
+    fi
+    rm -rf "$LOCK_DIR"
+    mkdir "$LOCK_DIR"
+fi
+echo "$$" > "$LOCK_DIR/pid"
+trap 'rm -rf "$LOCK_DIR"' EXIT
+
 PRODUCTS=$(cat <<'EOF'
 parts-intellect-synch|https://product-doc.tradesoft.ru/ai/synch/|Синхронизатор Parts.Intellect
 parts-resource-rest-api|https://product-doc.tradesoft.ru/ar/rest_api/|REST API Parts.Resource

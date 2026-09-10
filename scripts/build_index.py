@@ -256,6 +256,13 @@ def main():
             os.utime(DB_PATH, None)
         except OSError:
             pass
+        # фиксируем состояние стемминг-слоя для freshness.py
+        try:
+            import freshness
+            freshness.write_meta(freshness.build_fingerprint(),
+                                 os.path.getmtime(DB_PATH))
+        except Exception as e:
+            print(f"[warn] не удалось записать build_meta.json: {e}")
         print(f"Индекс обновлён: изменено {changed}, удалено {removed}, всего чанков {total}")
         if args.no_prime_stems:
             print("Префилд стемов пропущен (--no-prime-stems)")

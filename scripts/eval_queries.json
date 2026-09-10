@@ -824,6 +824,189 @@
     "parts-resource-guide__priem_onlajn_platezhej.htm.md",
     "parts-resource-guide__nastrojka_sposobov_oplaty.htm.md"
    ]
+  },
+  {
+   "q": "изменения parts resource версия 6.64",
+   "expected": [
+    "parts-resource-changes__versiya_6_64.htm.md"
+   ]
+  },
+  {
+   "q": "что нового в parts resource 6.60",
+   "expected": [
+    "parts-resource-changes__versiya_6_60.htm.md"
+   ]
+  },
+  {
+   "q": "о сервисе wazzup",
+   "expected": [
+    "wazzup__vvedenie.htm.md"
+   ]
+  },
+  {
+   "q": "интеграция wazzup с parts intellect",
+   "expected": [
+    "wazzup__podklyuchenie_i_nastrojka_servisa.htm.md"
+   ]
+  },
+  {
+   "q": "требования к устройству для работы с тсд",
+   "expected": [
+    "tsd__trebovaniya_k_ustrojstvu_tsd_.htm.md"
+   ]
+  },
+  {
+   "q": "задания на отгрузку товара через тсд",
+   "expected": [
+    "tsd__zadaniya_na_otgruzku_tovara.htm.md",
+    "tsd__rabota_s_tsd.htm.md"
+   ]
+  },
+  {
+   "q": "разбор товара на складе через тсд",
+   "expected": [
+    "tsd__zadaniya_na_razbor_tovara_.htm.md",
+    "tsd__rabota_s_tsd.htm.md"
+   ]
+  },
+  {
+   "q": "обновление остатков на маркетплейсе",
+   "expected": [
+    "marketplace__obnovlenie_ostatkov.htm.md"
+   ]
+  },
+  {
+   "q": "обновление цен на маркетплейсе",
+   "expected": [
+    "marketplace__obnovlenie_tsen.htm.md"
+   ]
+  },
+  {
+   "q": "загрузить товары на маркетплейс из файла xml",
+   "expected": [
+    "marketplace__iz_fajla_xml.htm.md"
+   ]
+  },
+  {
+   "q": "расчет плановой даты поставки товаров под заказ",
+   "expected": [
+    "delivery_schedule__raschet_planovoj_daty_postavki_dlya_tovarov_pod_zakaz.htm.md"
+   ]
+  },
+  {
+   "q": "график поставок между торговыми точками",
+   "expected": [
+    "delivery_schedule__nastrojka_grafikov_postavok_mezhdu_torgovymi_tochkami.htm.md"
+   ]
+  },
+  {
+   "q": "расчет плановой даты поставки товаров в наличии",
+   "expected": [
+    "delivery_schedule__raschet_planovoj_daty_postavki_dlya_tovarov_v_nalichii.htm.md"
+   ]
+  },
+  {
+   "q": "настроить мета теги страниц для seo",
+   "expected": [
+    "seo-guide__nastrojka_meta_tegov_stranits.htm.md",
+    "parts-resource-guide__prioritet_vyvoda_meta_tegov.htm.md",
+    "parts-resource-guide__nastrojka_seo_parametrov.htm.md"
+   ]
+  },
+  {
+   "q": "проверка сайта в яндекс вебмастер",
+   "expected": [
+    "seo-guide__nastrojka_sajta_v_yandeks_vebmaster_.htm.md",
+    "parts-resource-guide__dopolnitelnye_instrumenty_dlya_indeksatsii.htm.md",
+    "parts-resource-guide__nastrojki_meta_tegov_verifikatsii.htm.md"
+   ]
+  },
+  {
+   "q": "настроить карту сайта и генерацию xml",
+   "expected": [
+    "seo-guide__nastrojka_karty_sajta.htm.md",
+    "seo-guide__aktivatsiya_generatsii_xml_karty_sajta.htm.md"
+   ]
+  },
+  {
+   "q": "аналоги в синхронизаторе parts intellect",
+   "expected": [
+    "parts-intellect-synch__peredacha_analogov_iz_parts_intellect_v_parts_resource.htm.md",
+    "parts-intellect-synch__vygruzka_analogov_iz_parts_intellect.htm.md"
+   ]
+  },
+  {
+   "q": "индикация процесса синхронизации",
+   "expected": [
+    "parts-intellect-synch__indikatsiya_protsessa_sinkhronizatsii.htm.md"
+   ]
+  },
+  {
+   "q": "добавить способ оплаты на сайт синхронизатором",
+   "expected": [
+    "parts-intellect-synch__dobavlenie_sposoba_oplaty_na_sajt.htm.md"
+   ]
+  },
+  {
+   "q": "получить информацию о детали по артикулу через service api",
+   "expected": [
+    "service-api__info__info_get-part-info.htm.md"
+   ]
+  },
+  {
+   "q": "получить бренды по штрихкоду через service api",
+   "expected": [
+    "service-api__info__info_get-brands-by-barcode.htm.md"
+   ]
+  },
+  {
+   "q": "аналоги детали через service api",
+   "expected": [
+    "service-api__analog__analog_get-analogs.htm.md"
+   ]
+  },
+  {
+   "q": "sms уведомления клиентам через service api",
+   "expected": [
+    "service-api__messenger__messenger_get-sms-status.htm.md"
+   ]
+  },
+  {
+   "q": "получить информацию о прайс-листе по api",
+   "expected": [
+    "parts-resource-rest-api__3_10_2__poluchenie_informatsii_o_prajs_liste.htm.md"
+   ]
+  },
+  {
+   "q": "api позиции прайс-листов остатки",
+   "expected": [
+    "parts-resource-rest-api__3_11__api_pozitsii_prajs_listov__ostatkov_.htm.md"
+   ]
+  },
+  {
+   "q": "получить поставщиков через api",
+   "expected": [
+    "parts-resource-rest-api__3_21__api_postavshchiki.htm.md"
+   ]
+  },
+  {
+   "q": "что нового в parts intellect версия 5.23",
+   "expected": [
+    "parts-intellect-changes__versiya_5_23.htm.md"
+   ]
+  },
+  {
+   "q": "импорт документов из диадок в parts intellect",
+   "expected": [
+    "diadok__import_dokumentov_iz_diadok.htm.md",
+    "diadok__nastrojka_importa_iz_diadok.htm.md"
+   ]
+  },
+  {
+   "q": "экспорт документов в диадок",
+   "expected": [
+    "diadok__ehksport_dokumentov_v_diadok.htm.md"
+   ]
   }
  ]
 }

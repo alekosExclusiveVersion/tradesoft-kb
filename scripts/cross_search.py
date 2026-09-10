@@ -204,26 +204,37 @@ class DocsSource:
             pending.append(entry)
 
         # Подтягиваем полный контент из кэша для всех найденных страниц
-        # (для первичного блока ответа нужна полная инструкция).
+        # (для первичного блока ответа нужна полная инструкция). Одним запросом
+        # пачками (SQLite лимит параметров ~999), а не N одиночных SELECT'ов.
         if pending:
             try:
                 con = sqlite3.connect(f"file:{KB_ROOT}/cache/kb_index.db?mode=ro", uri=True)
                 try:
+                    # (product, page) -> все чанки страницы по порядку
+                    full_by_key = {}
+                    pairs = [(p["product"], p["page"]) for p in pending]
+                    for i in range(0, len(pairs), 64):
+                        batch = pairs[i:i + 64]
+                        ph = ",".join("(?,?)" for _ in batch)
+                        cursor = con.execute(
+                            f"SELECT product, page, content FROM pages "
+                            f"WHERE (product, page) IN ({ph}) ORDER BY chunk",
+                            [v for pair in batch for v in pair])
+                        for r in cursor:
+                            full_by_key.setdefault((r[0], r[1]), []).append(r[2] or "")
                     for entry in pending:
-                        row = con.execute(
-                            "SELECT content FROM pages WHERE product=? AND page=?",
-                            (entry["product"], entry["page"]),
-                        ).fetchone()
-                        if row and row[0]:
-                            full = row[0]
-                            entry["content_full"] = full
-                            if len(entry["content"]) < 120:
-                                entry["content"] = _build_excerpt(entry["product"],
-                                                                  entry["content"], full)
+                        parts = full_by_key.get((entry["product"], entry["page"]))
+                        if not parts:
+                            continue
+                        full = "\n".join(parts)
+                        entry["content_full"] = full
+                        if len(entry["content"]) < 120:
+                            entry["content"] = _build_excerpt(entry["product"],
+                                                              entry["content"], full)
                 finally:
                     con.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[docs] подтягивание контента: {e}", file=sys.stderr)
         return results
 
 
