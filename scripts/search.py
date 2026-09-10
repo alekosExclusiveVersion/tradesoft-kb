@@ -788,6 +788,31 @@ def _canonical_query(query):
 _PAGE_CONTENT_CACHE = {}
 
 
+def force_row(product, page, stems):
+    """Строка результата (product, page, title, path, snippet, score) для
+    страницы, выпавшей из кандидатов из-за продукт-сужения или отсутствия в
+    топ-30 обеих ног. Нужно для роутинг-правил (fusion.route_rows): целевая
+    страница правильная по смыслу, но гибрид её вообще не видит.
+    """
+    try:
+        db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        row = db.execute(
+            "SELECT title, path FROM pages WHERE product=? AND page=? "
+            "ORDER BY chunk LIMIT 1",
+            (product, page)).fetchone()
+        db.close()
+    except Exception:
+        return None
+    if not row:
+        return None
+    title, path = row
+    try:
+        snip = smart_snippet(product, page, stems)
+    except Exception:
+        snip = ""
+    return (product, page, title or page, path or page, snip, 100.0)
+
+
 def _page_content(product, page):
     """Весь текст страницы (все чанки) из SQLite. Кэшируется."""
     key = (product, page)
@@ -995,6 +1020,13 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
 
     rows, elapsed, meta = _hybrid_inner(query, product, limit, snippets, embed_host)
 
+    # Роутинг-правила применяем ПОСЛЕ wide/layout-фолбэков: они видят финальный
+    # список и могут принудительно вернуть страницу, выпавшую из-за
+    # продукт-сужения (см. fusion.route_rows).
+    def _routed(r):
+        from fusion import route_rows
+        return route_rows(query, r)
+
     # Wide-fallback: если автодетектированный продукт сузил поиск, а результат
     # слабый (мало терминов в топе), повторяем по ВСЕМ продуктам и, если он
     # заметно лучше покрывает термины запроса, берём его. Детект ошибочен,
@@ -1027,15 +1059,15 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
                 alt_cov = _result_coverage(alt, alt_rows)
                 if not rows:
                     if with_meta:
-                        return alt_rows, elapsed, alt_meta
-                    return alt_rows, elapsed
+                        return _routed(alt_rows), elapsed, alt_meta
+                    return _routed(alt_rows), elapsed
                 if alt_cov >= primary_cov + 0.34:
                     if with_meta:
-                        return alt_rows, elapsed, alt_meta
-                    return alt_rows, elapsed
+                        return _routed(alt_rows), elapsed, alt_meta
+                    return _routed(alt_rows), elapsed
     if with_meta:
-        return rows, elapsed, meta
-    return rows, elapsed
+        return _routed(rows), elapsed, meta
+    return _routed(rows), elapsed
 
 
 def _hybrid_inner(query, product, limit, snippets, embed_host):

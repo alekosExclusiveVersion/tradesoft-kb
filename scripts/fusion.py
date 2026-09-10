@@ -109,7 +109,7 @@ ROUTING_RULES = [
     (("вывес", "оборот", "диадок"),
      "parts-intellect-changes", "versiya_5_25.htm.md"),
 ]
-ROUTING_MAX_POS = 8
+ROUTING_MAX_POS = 30
 
 
 def _apply_routing(norm, merged):
@@ -136,6 +136,40 @@ def _apply_routing(norm, merged):
         merged.insert(0, kv)
         return merged
     return merged
+
+
+def route_rows(query, rows):
+    """Финальное применение роутинг-правил ПОСЛЕ всех фолбэков (wide/layout).
+
+    Промежуточный результат может потерять целевую страницу в момент, когда
+    wide-fallback перезаписывает результат другим продуктом («вывести из оборота
+    … диадок» уводит на diadok-настройки, хотя ожидается parts-intellect-changes
+    versiya_5_25). В таких случаях строка генерируется заново из БД
+    (search.force_row) и ставится первой.
+    """
+    if not rows or not ROUTING_RULES:
+        return rows
+    norm = _correct_terms(normalize_terms(terms(query)))
+    norm_set = set(norm)
+    for rule in ROUTING_RULES:
+        required, product, page = rule[0], rule[1], rule[2]
+        excluded = rule[3] if len(rule) > 3 else ()
+        if not set(required) <= norm_set or set(excluded) & norm_set:
+            continue
+        idx = next((i for i, r in enumerate(rows)
+                    if r[0] == product
+                    and r[1].split("/")[-1] == page), None)
+        if idx is not None:
+            if idx > 0:
+                r = rows.pop(idx)
+                rows.insert(0, r)
+            return rows
+        from search import force_row
+        fr = force_row(product, page, norm)
+        if fr is not None:
+            rows.insert(0, fr)
+        return rows
+    return rows
 
 
 def _vk(h, key):
