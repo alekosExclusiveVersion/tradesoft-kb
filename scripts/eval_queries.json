@@ -1,5 +1,5 @@
 {
- "note": "Веха 2026-09-10: расширение набора до 103 запросов синтетикой по toc всех продуктов + реальные запросы из kb_access.db. Старый набор 47 сохранён без изменений. (+ фикс expected: аналоги/диадок/филиал/мета-теги)",
+ "note": "Веха 2026-09-10: расширение набора до 103 запросов синтетикой по toc всех продуктов + реальные запросы из kb_access.db. Старый набор 47 сохранён без изменений. (+ фикс expected: аналоги/диадок/филиал/мета-теги) (+8 запросов из реальных логов search_events) (+фикс expected: выгрузка прайсов в синхронизаторе)",
  "queries": [
   {
    "q": "подключить нового поставщика",
@@ -766,6 +766,62 @@
    "expected": [
     "diadok__nastrojka_ehksporta_v_diadok.htm.md",
     "diadok__ehksport_dokumentov_v_diadok.htm.md"
+   ]
+  },
+  {
+   "q": "как сделать возврат поставщику",
+   "expected": [
+    "parts-intellect-guide__vozvrat_postavshchiku_master_sozdaniya_sklad_i_zakupki.htm.md",
+    "parts-resource-guide__vozvrat_sredstv_ot_postavshchika.htm.md"
+   ]
+  },
+  {
+   "q": "выгрузка прайс",
+   "expected": [
+    "parts-resource-guide__vygruzka_tovarov_v_prajs_list.htm.md",
+    "parts-resource-guide__sozdanie_pravila_vygruzki_prajs_lista.htm.md"
+   ]
+  },
+  {
+   "q": "как настроить seo на сайте",
+   "expected": [
+    "parts-resource-guide__nastrojka_seo_parametrov.htm.md",
+    "seo-guide__pervichnye_nastrojki_sajta.htm.md"
+   ]
+  },
+  {
+   "q": "настроить выгрузку прайсов в синхронизаторе",
+   "expected": [
+    "parts-intellect-synch__zadanie_dopolnitelnykh_nastroek_sinkhronizatsii.htm.md",
+    "parts-intellect-synch__vygruzka_prajs_listov_i_skladskikh_ostatkov.htm.md",
+    "parts-intellect-synch__peredacha_prajs_listov_iz_parts_intellect_v_parts_resource.htm.md"
+   ]
+  },
+  {
+   "q": "настроить печать чека",
+   "expected": [
+    "parts-intellect-guide__nastrojka_pechati_chekov.htm.md",
+    "parts-intellect-guide__pravila_pechati_chekov_po_sno.htm.md"
+   ]
+  },
+  {
+   "q": "настроить поиск по наименованию",
+   "expected": [
+    "parts-resource-guide__podbor_detali_po_naimenovaniyu.htm.md"
+   ]
+  },
+  {
+   "q": "подключить нового веб-поставщика по api",
+   "expected": [
+    "parts-intellect-guide__dobavlenie_veb_postavshchika.htm.md",
+    "service-api__provider__provider_get-provider-list.htm.md"
+   ]
+  },
+  {
+   "q": "подключить оплаты на сайте",
+   "expected": [
+    "parts-resource-guide__priem_onlajn_platezhej.htm.md",
+    "parts-resource-guide__nastrojka_sposobov_oplaty.htm.md"
    ]
   }
  ]

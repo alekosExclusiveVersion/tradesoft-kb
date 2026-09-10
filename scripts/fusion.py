@@ -140,6 +140,9 @@ ROUTING_RULES = [
     # Синхронизация интеллекта с ресурсом (intellect-guide overview vs synch-изменения).
     (("синхронизаци", "интеллект", "ресурс"),
      "parts-intellect-guide", "sinkhronizatsiya_s_parts_resource.htm.md"),
+    # Настройка печати чеков (настройка принтера vs правила печати vs настройка чеков).
+    (("настро", "печа", "чек"),
+     "parts-intellect-guide", "nastrojka_pechati_chekov.htm.md"),
 ]
 ROUTING_MAX_POS = 30
 
