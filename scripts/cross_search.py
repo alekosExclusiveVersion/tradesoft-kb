@@ -555,7 +555,16 @@ def merge_results(docs, solutions, crm, max_docs=8, max_solutions=5, max_crm=3):
     return all_results
 
 
-def compose_answers(results, intent, max_answers=2, cross_links=None):
+# Страницы-«основная информация» по темам продуктов. Когда в результатах группы
+# есть и основная страница раздела, и её фрагменты-дополнения (правила/примеры/
+# алгоритмы), первичным блоком берём основную, а дополнения остаются в related.
+# Ключ: (docs_product, тема из запроса).
+MAIN_DOC_PAGES = {
+    ("parts-intellect-guide", "печать чеков"): "protsess_pechati_chekov_v_programme.htm.md",
+}
+
+
+def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
     """Собирает 1-2 структурированных ответа из результатов.
 
     Каждый ответ содержит блоки how_to и how_it_works, упорядоченные по интенту.
@@ -624,6 +633,17 @@ def compose_answers(results, intent, max_answers=2, cross_links=None):
                 primary_block = lst[0]
                 break
 
+        # Если по теме запроса известна «основная» страница продукта — ставим её
+        # первичным блоком (дополнения группы уходят в related).
+        if primary_block is not None and primary_block.get("source") == "docs":
+            for (doc_prod, topic), page in MAIN_DOC_PAGES.items():
+                if doc_prod == primary_block.get("product") and topic in query:
+                    prefs = [r for r in pools["docs"] if r.get("product") == doc_prod
+                             and r.get("page") == page]
+                    if prefs:
+                        primary_block = prefs[0]
+                    break
+
         if primary_block is None and prod_results:
             primary_block = prod_results[0]
 
@@ -677,11 +697,12 @@ def compose_answers(results, intent, max_answers=2, cross_links=None):
                                 "score": rs["bm25_score"],
                             })
                         # И другие релевантные страницы того же продукта
-                        # (собраны поиском, но не вошли в единственный блок).
+                        # (собраны поиском, но не вошли в единственный блок,
+                        # включая фрагменты-дополнения вроде «Правил… по СНО»).
                         sec_docs = [r for r in pools.get("docs", [])
                                     if r.get("path") != b.get("path")]
                         sec_docs.sort(key=lambda r: r.get("score", 0), reverse=True)
-                        for sd in sec_docs[:3]:
+                        for sd in sec_docs[:5]:
                             if not any(d.get("path") == sd["path"]
                                        for d in answer["related_docs"]):
                                 answer["related_docs"].append({
@@ -825,11 +846,11 @@ def _cross_search_impl(query, max_answers, limit_per_source):
 
     try:
         answers = compose_answers(merged, intent, max_answers=max_answers,
-                                  cross_links=cross_links)
+                                  cross_links=cross_links, query=query)
     except Exception as e:
         print(f"[compose] error: {e}", file=sys.stderr)
         answers = compose_answers(merged, intent, max_answers=max_answers,
-                                  cross_links=None)
+                                  cross_links=None, query=query)
 
     latency_ms = int((time.time() - t0) * 1000)
 
