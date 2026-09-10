@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Unified Search — Tradesoft</title>
+<link rel="icon" href="data:,">
 <style>
 :root {
     --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
@@ -119,13 +120,13 @@ function parseHash() {
     };
 }
 
-let top = 3;
+let resultsLimit = 3;
 let product = '';
 
 function updateHash(q) {
     const p = new URLSearchParams();
     p.set('q', q);
-    p.set('top', String(top));
+    p.set('top', String(resultsLimit));
     if (product) p.set('product', product);
     const h = '#' + p.toString();
     if (location.hash !== h) {
@@ -145,7 +146,7 @@ function search() {
     document.getElementById('results').innerHTML = '<div class="loading">Поиск</div>';
     document.getElementById('stats').textContent = '';
 
-    fetch(`${API}?q=${encodeURIComponent(q)}&max=${top}`)
+    fetch(`${API}?q=${encodeURIComponent(q)}&max=${resultsLimit}`)
         .then(r => r.json())
         .then(data => renderResults(data))
         .catch(err => {
@@ -156,7 +157,7 @@ function search() {
 
 window.addEventListener('hashchange', () => {
     const h = parseHash();
-    top = h.top;
+    resultsLimit = h.top;
     product = h.product;
     document.getElementById('query').value = h.q;
     if (h.q) search();
@@ -164,7 +165,7 @@ window.addEventListener('hashchange', () => {
 
 (function init() {
     const h = parseHash();
-    top = h.top;
+    resultsLimit = h.top;
     product = h.product;
     if (h.q) {
         document.getElementById('query').value = h.q;
