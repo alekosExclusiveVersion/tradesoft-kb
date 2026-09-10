@@ -178,6 +178,48 @@ class CRMSource:
 
 
 # ---------------------------------------------------------------------------
+# Cross-links source
+# ---------------------------------------------------------------------------
+
+class CrossLinksSource:
+    """Cross-links между решениями и документацией."""
+
+    def __init__(self):
+        db_path = os.path.join(KB_ROOT, "cache", "cross_links.db")
+        if not os.path.exists(db_path):
+            self._conn = None
+            return
+        self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        self._conn.row_factory = sqlite3.Row
+
+    def get_related_docs(self, solution_id, limit=3):
+        """Для решения возвращает связанные страницы документации."""
+        if not self._conn:
+            return []
+        rows = self._conn.execute("""
+            SELECT doc_path, doc_product, doc_title, bm25_score
+            FROM solution_to_doc
+            WHERE solution_id = ?
+            ORDER BY bm25_score DESC
+            LIMIT ?
+        """, (str(solution_id), limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_related_solutions(self, doc_path, limit=3):
+        """Для страницы документации возвращает связанные решения."""
+        if not self._conn:
+            return []
+        rows = self._conn.execute("""
+            SELECT solution_id, solution_title, solution_product, bm25_score
+            FROM doc_to_solution
+            WHERE doc_path = ?
+            ORDER BY bm25_score DESC
+            LIMIT ?
+        """, (doc_path, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # Cross-source merge + compose
 # ---------------------------------------------------------------------------
 
@@ -232,10 +274,11 @@ def merge_results(docs, solutions, crm, max_per_source=5):
     return all_results
 
 
-def compose_answers(results, intent, max_answers=2):
+def compose_answers(results, intent, max_answers=2, cross_links=None):
     """Собирает 1-2 структурированных ответа из результатов.
 
     Каждый ответ содержит блоки how_to и how_it_works, упорядоченные по интенту.
+    Если доступны cross-links, добавляет related_docs и related_solutions.
     """
     # Классифицируем блоки
     for r in results:
@@ -276,6 +319,8 @@ def compose_answers(results, intent, max_answers=2):
                 "blocks": blocks,
                 "images": [],
                 "related_deals": [],
+                "related_docs": [],
+                "related_solutions": [],
             }
             # Собираем связанные сделки
             for b in blocks:
@@ -283,6 +328,31 @@ def compose_answers(results, intent, max_answers=2):
                     answer["related_deals"].append(b["deal_id"])
                 if b.get("url"):
                     answer.setdefault("source_urls", []).append(b["url"])
+
+            # Добавляем cross-links
+            if cross_links:
+                for b in blocks:
+                    if b["source"] == "solution" and b.get("deal_id"):
+                        # Для решения — связанные страницы документации
+                        rel_docs = cross_links.get_related_docs(b["deal_id"], limit=2)
+                        for rd in rel_docs:
+                            answer["related_docs"].append({
+                                "path": rd["doc_path"],
+                                "title": rd["doc_title"],
+                                "product": rd["doc_product"],
+                                "score": rd["bm25_score"],
+                            })
+                    elif b["source"] == "docs" and b.get("path"):
+                        # Для документации — связанные решения
+                        rel_sols = cross_links.get_related_solutions(b["path"], limit=2)
+                        for rs in rel_sols:
+                            answer["related_solutions"].append({
+                                "id": rs["solution_id"],
+                                "title": rs["solution_title"],
+                                "product": rs["solution_product"],
+                                "score": rs["bm25_score"],
+                            })
+
             answers.append(answer)
 
         if len(answers) >= max_answers:
@@ -352,9 +422,18 @@ def cross_search(query, max_answers=2, limit_per_source=5):
     except Exception as e:
         print(f"[crm] error: {e}", file=sys.stderr)
 
-    # 3. Merge + Compose
+    # 3. Merge + Compose with cross-links
     merged = merge_results(doc_results, sol_results, crm_results)
-    answers = compose_answers(merged, intent, max_answers=max_answers)
+
+    # Initialize cross-links source
+    cross_links = None
+    try:
+        cross_links = CrossLinksSource()
+    except Exception as e:
+        print(f"[cross-links] init error: {e}", file=sys.stderr)
+
+    answers = compose_answers(merged, intent, max_answers=max_answers,
+                              cross_links=cross_links)
 
     latency_ms = int((time.time() - t0) * 1000)
 
