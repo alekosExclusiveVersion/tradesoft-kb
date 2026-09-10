@@ -251,7 +251,7 @@ function renderResults(data) {
                 html += ` — <a href="${block.url}" target="_blank">источник</a>`;
             }
             html += `</div>`;
-            html += `<div class="block-content">${renderContent(block.content, docBase(block.path))}</div>`;
+            html += `<div class="block-content">${renderContent(stripLeadingTitle(block.content, block.title), docBase(block.path))}</div>`;
             if (block.source === 'docs' && block.path &&
                 (block.content || '').length < 1200) {
                 html += `<a href="#" class="block-more" data-path="${escapeHtml(block.path)}">Развернуть полную инструкцию</a>`;
@@ -315,7 +315,7 @@ function toggleFull(link) {
                 if (data.error) {
                     fullDiv.innerHTML = `<em>${escapeHtml(data.error)}</em>`;
                 } else {
-                    fullDiv.innerHTML = renderContent(data.content, docBase(data.path || link.dataset.path));
+                    fullDiv.innerHTML = renderContent(stripLeadingTitle(data.content, data.title), docBase(data.path || link.dataset.path));
                 }
                 fullDiv.dataset.loaded = '1';
                 fullDiv.classList.remove('hidden');
@@ -362,6 +362,23 @@ const DOC_SECTIONS = {
     'parts-resource-rest-api': ['ar', 'rest_api'],
     'seo-guide': ['ar', 'online_guides'],
 };
+
+function stripLeadingTitle(text, title) {
+    if (!title) return text;
+    const t = title.trim();
+    const lines = String(text || '').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        const h = line.match(/^(#{1,5})\s+(.+)$/);
+        if (h && h[2].trim() === t) {
+            lines.splice(i, 1);
+            return lines.join('\n');
+        }
+        break;
+    }
+    return text;
+}
 
 function renderContent(text, base) {
     if (!text) return '<em>нет контента</em>';
