@@ -442,19 +442,43 @@ def _normalize_product(source_name, product_name):
     return product_name
 
 
+_CHANGES_HINTS = ("версия", "изменени", "что нового", "нового", "обновлени",
+                  "changelog", "release", "5.2", "5.1", "6.", "7.")
+
+
+def _asks_for_changes(query):
+    """Запрос про версии/изменения → changelog-страницы уместны."""
+    from intent import stem
+    q = " ".join(stem(t) for t in query.lower().split())
+    return any(h in q for h in _CHANGES_HINTS)
+
+
 def merge_results(docs, solutions, crm, max_per_source=5):
-    """Объединяет результаты из 3 источников в единый список."""
+    """Объединяет результаты из 3 источников в единый список.
+
+    Скоры разных источников несопоставимы (docs: гибрид/BM25, бывает
+    отрицательным; solutions: 0..1; crm: 0..1). Для сквозного упорядочивания
+    присваиваем скор по рангу в источнике: docs > solutions > crm на равных
+    позициях, но хорошее решение (ранг 1) обгоняет слабую страницу (ранг ≥4).
+    Исходный скор сохраняется в 'raw_score'.
+    """
     all_results = []
 
-    for r in docs[:max_per_source]:
+    for i, r in enumerate(docs[:max_per_source]):
+        r["raw_score"] = r.get("score", 0)
+        r["score"] = round(1.0 * (0.92 ** i), 3)
         r["product_canonical"] = _normalize_product("docs", r.get("product"))
         all_results.append(r)
 
-    for r in solutions[:max_per_source]:
+    for i, r in enumerate(solutions[:max_per_source]):
+        r["raw_score"] = r.get("score", 0)
+        r["score"] = round(0.9 * (0.9 ** i), 3)
         r["product_canonical"] = _normalize_product("solution", r.get("product"))
         all_results.append(r)
 
-    for r in crm[:3]:
+    for i, r in enumerate(crm[:3]):
+        r["raw_score"] = r.get("score", 0)
+        r["score"] = round(0.45 * (0.85 ** i), 3)
         r["product_canonical"] = None
         all_results.append(r)
 
@@ -605,7 +629,17 @@ def _cross_search_impl(query, max_answers, limit_per_source):
     def _search_docs():
         try:
             ds = _get_docs_source()
-            return ds.search(query, docs_product, limit=limit_per_source)
+            # Ищем по всем продуктам документации: строгий фильтр по detect_product
+            # теряет changelog-страницы (-changes), wazzup, marketplace и т.п.,
+            # которые присутствуют в docs-эталоне. Продукт остаётся per-документ
+            # (флаг для группировки в compose), а не фильтром.
+            rows = ds.search(query, None, limit=limit_per_source)
+            if _asks_for_changes(query):
+                return rows
+            # Подавляем changelog-шум: страницы *-changes попадают в топ для
+            # обычных запросов («как направить seo» → «Версия 6.64»).
+            return [r for r in rows
+                    if not ("-changes" in (r.get("product") or ""))]
         except Exception as e:
             print(f"[docs] error: {e}", file=sys.stderr)
             return []
