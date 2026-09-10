@@ -72,7 +72,7 @@ def _get_cross_links_source():
 class DocsSource:
     """tradesoft-kb: документация products (FTS5 + vectors)."""
 
-    def __init__(self, hybrid_timeout_ms=1000):
+    def __init__(self, hybrid_timeout_ms=5000):
         import threading
         from search import search_hybrid
         self._search = search_hybrid
@@ -448,8 +448,7 @@ _CHANGES_HINTS = ("версия", "изменени", "что нового", "н
 
 def _asks_for_changes(query):
     """Запрос про версии/изменения → changelog-страницы уместны."""
-    from intent import stem
-    q = " ".join(stem(t) for t in query.lower().split())
+    q = query.lower()
     return any(h in q for h in _CHANGES_HINTS)
 
 
