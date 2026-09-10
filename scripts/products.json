@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "products": {
+    "parts_resource": {
+      "display": "Parts.Resource",
+      "docs_product": "parts-resource-guide",
+      "docs_rest_api": "parts-resource-rest-api",
+      "solutions_product": "Parts.Resource",
+      "crm_keywords": ["ресурс", "parts.resource", "арм"],
+      "search_keywords": ["ресурс", "parts resource", "арм", "crm"],
+      "description": "Интернет-магазин на 1С-Битрикс с интеграцией с Parts.Intellect"
+    },
+    "parts_intellect": {
+      "display": "Parts.Intellect",
+      "docs_product": "parts-intellect-guide",
+      "docs_rest_api": "parts-index-rest-api",
+      "docs_sync": "parts-intellect-synch",
+      "docs_changes": "parts-intellect-changes",
+      "solutions_product": "Parts.Intellect",
+      "solutions_aliases": ["AutoИнтеллект", "AutoIntellect"],
+      "crm_keywords": ["интеллект", "parts.intellect", "autoинтеллект"],
+      "search_keywords": ["интеллект", "parts intellect", "autoинтеллект"],
+      "description": "Система управления запчастями: заказы, аналитика, прайс-листы, маркировка"
+    },
+    "sync": {
+      "display": "Синхронизатор",
+      "docs_product": "parts-intellect-synch",
+      "solutions_product": "Синхронизатор",
+      "crm_keywords": ["синхронизатор", "синхронизация", "sync"],
+      "search_keywords": ["синхронизация", "синхронизатор", "выгрузка прайс"],
+      "description": "Синхронизация данных между Parts.Intellect и Parts.Resource"
+    },
+    "diadok": {
+      "display": "Диадок",
+      "docs_product": "diadok",
+      "solutions_product": null,
+      "crm_keywords": ["диадок", "edо", "электронный документооборот"],
+      "search_keywords": ["диадок", "edо", "документооборот", "маркировка"],
+      "description": "Интеграция с ЭДО-сервисом Диадок (СКБ Контур)"
+    },
+    "seo": {
+      "display": "SEO",
+      "docs_product": "seo-guide",
+      "solutions_product": null,
+      "crm_keywords": ["seo", "поисковая оптимизация"],
+      "search_keywords": ["seo", "мета-теги", "поисковик", "индексация"],
+      "description": "SEO-руководство для интернет-магазина"
+    },
+    "delivery": {
+      "display": "График поставок",
+      "docs_product": "delivery_schedule",
+      "solutions_product": null,
+      "crm_keywords": ["поставки", "график"],
+      "search_keywords": ["поставки", "график поставок", "доставка"],
+      "description": "Управление графиком поставок от поставщиков"
+    },
+    "wazzup": {
+      "display": "Wazzup",
+      "docs_product": "wazzup",
+      "solutions_product": null,
+      "crm_keywords": ["wazzup"],
+      "search_keywords": ["wazzup", "рассылка"],
+      "description": "Сервис рассылок и уведомлений"
+    },
+    "tsd": {
+      "display": "ТСД",
+      "docs_product": "tsd",
+      "solutions_product": null,
+      "crm_keywords": ["тсд", "терминал"],
+      "search_keywords": ["тсд", "терминал", "считыватель"],
+      "description": "Работа с терминалами сбора данных"
+    },
+    "marketplace": {
+      "display": "Маркетплейсы",
+      "docs_product": "marketplace",
+      "solutions_product": null,
+      "crm_keywords": ["маркетплейс", "авито", "яндекс.маркет"],
+      "search_keywords": ["маркетплейс", "авито", "яндекс маркет", "выгрузка товаров"],
+      "description": "Интеграция с маркетплейсами (Avito, Яндекс.Маркет)"
+    },
+    "var": {
+      "display": "ВАР",
+      "docs_product": null,
+      "solutions_product": "ВАР",
+      "crm_keywords": ["вар"],
+      "search_keywords": ["вар"],
+      "description": "Внутренняя аналитика и отчёты"
+    },
+    "other": {
+      "display": "Другое",
+      "docs_product": null,
+      "solutions_product": "Другое",
+      "crm_keywords": [],
+      "search_keywords": [],
+      "description": "Прочие вопросы"
+    }
+  }
+}
