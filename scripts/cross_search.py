@@ -593,6 +593,34 @@ MAIN_DOC_PAGES = {
     ("parts-intellect-guide", "печать чеков"): "protsess_pechati_chekov_v_programme.htm.md",
 }
 
+# Страницы-«оглавления»: короткий тизер («Рассмотрим … подробнее»), а содержание
+# лежит в дочерних страницах. Список детей показываем в related_docs блока.
+# Ключ: path родительской страницы.
+DOC_CHILD_PAGES = {
+    "parts-resource-guide__pechat_chekov_polnogo_rascheta.htm.md": [
+        "parts-resource-guide__pechat_cheka_polnogo_rascheta_po_pozitsiyam_zakazov.htm.md",
+        "parts-resource-guide__pechat_cheka_polnogo_rascheta_po_otgruzkam.htm.md",
+    ],
+}
+
+
+@lru_cache(maxsize=256)
+def _page_title(path):
+    """Заголовок страницы документации по path='product__page.htm.md'."""
+    product, _, page = path.partition("__")
+    try:
+        con = sqlite3.connect(f"file:{KB_ROOT}/cache/kb_index.db?mode=ro", uri=True)
+        try:
+            row = con.execute(
+                "SELECT title FROM pages WHERE product=? AND page=?",
+                (product, page),
+            ).fetchone()
+            return row[0] if row else path
+        finally:
+            con.close()
+    except Exception:
+        return path
+
 
 def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
     """Собирает 1-2 структурированных ответа из результатов.
@@ -740,6 +768,16 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
                                     "title": sd.get("title", ""),
                                     "product": sd.get("product", ""),
                                     "score": sd.get("score", 0),
+                                })
+                        # Страница-«оглавление»: подтягиваем дочерние страницы.
+                        for child in DOC_CHILD_PAGES.get(b["path"], ()):
+                            if not any(d.get("path") == child
+                                       for d in answer["related_docs"]):
+                                answer["related_docs"].append({
+                                    "path": child,
+                                    "title": _page_title(child),
+                                    "product": child.partition("__")[0],
+                                    "score": 0.0,
                                 })
 
             answers.append(answer)
