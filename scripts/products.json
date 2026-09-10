@@ -7,7 +7,7 @@
       "docs_rest_api": "parts-resource-rest-api",
       "solutions_product": "Parts.Resource",
       "crm_keywords": ["ресурс", "parts.resource", "арм"],
-      "search_keywords": ["ресурс", "parts resource", "арм", "crm"],
+      "search_keywords": ["ресурс", "parts resource", "арм", "crm", "пароль", "авторизац", "идентификац", "домен", "хостинг"],
       "description": "Интернет-магазин на 1С-Битрикс с интеграцией с Parts.Intellect"
     },
     "parts_intellect": {
@@ -19,7 +19,7 @@
       "solutions_product": "Parts.Intellect",
       "solutions_aliases": ["AutoИнтеллект", "AutoIntellect"],
       "crm_keywords": ["интеллект", "parts.intellect", "autoинтеллект"],
-      "search_keywords": ["интеллект", "parts intellect", "autoинтеллект"],
+      "search_keywords": ["интеллект", "parts intellect", "autoинтеллект", "ценник", "печать", "прайс", "поиск", "товар", "заказ", "остатк", "склад"],
       "description": "Система управления запчастями: заказы, аналитика, прайс-листы, маркировка"
     },
     "sync": {

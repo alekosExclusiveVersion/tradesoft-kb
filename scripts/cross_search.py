@@ -87,27 +87,43 @@ class SolutionsSource:
         from intent import stem
         stemmed_tokens = [stem(t) for t in tokens]
 
+        # Score-based matching: title > question > resolution
         where = []
         args = []
+        score_parts = []
         for tok in stemmed_tokens:
-            # Use prefix matching with stemmed token
             pat = f"%{tok}%"
+            # Title match: weight 3
+            # Question match: weight 2
+            # Resolution match: weight 1
+            score_parts.append("(CASE WHEN title LIKE ? THEN 3 WHEN question LIKE ? THEN 2 ELSE 0 END)")
             where.append("(title LIKE ? OR question LIKE ? OR "
-                         "COALESCE(resolution,'') LIKE ? OR "
-                         "COALESCE(product_display,'') LIKE ?)")
-            args += [pat] * 4
+                         "COALESCE(resolution,'') LIKE ?)")
+            args += [pat, pat, pat, pat, pat]
 
         # Filter by canonical product ID (in 'product' column)
+        # Solutions DB uses: auto_intellect, parts_intellect, parts_resource, sync, var, other
         if product:
-            where.append("product = ?")
-            args.append(product)
+            # Map our canonical IDs to solutions DB format
+            sol_product_map = {
+                "parts_intellect": ["parts_intellect", "auto_intellect"],
+                "parts_resource": ["parts_resource"],
+                "sync": ["sync"],
+                "var": ["var"],
+            }
+            sol_products = sol_product_map.get(product, [product])
+            placeholders = ",".join(["?"] * len(sol_products))
+            where.append(f"product IN ({placeholders})")
+            args.extend(sol_products)
 
         where_sql = " AND ".join(where)
+        score_sql = " + ".join(score_parts)
         rows = self._conn.execute(
             f"SELECT id, title, question, resolution, product_display, "
-            f"date_create, confidence "
+            f"date_create, confidence, "
+            f"({score_sql}) as match_score "
             f"FROM cases WHERE {where_sql} "
-            f"ORDER BY confidence DESC LIMIT ?",
+            f"ORDER BY match_score DESC, confidence DESC LIMIT ?",
             args + [limit]).fetchall()
 
         results = []
