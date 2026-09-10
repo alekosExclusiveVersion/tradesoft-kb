@@ -859,10 +859,36 @@ def cross_search(query, max_answers=2, limit_per_source=5):
       - product: str|None — определённый продукт
       - latency_ms: int — время выполнения
     """
+    _ensure_index_fresh()
     t0 = time.time()
     result = _cross_search_cached(query, max_answers, limit_per_source)
     result["latency_ms"] = int((time.time() - t0) * 1000)
     return result
+
+
+_LAST_IDX_MTIME = None
+
+
+def _ensure_index_fresh():
+    """Сброс LRU-ответов и заголовков страниц при пересборке индекса.
+
+    Поисковый LRU (128 запросов) и _page_title без инвалидации отдавали бы
+    устаревшие данные до перезапуска/вытеснения. Индекс (cache/kb_index.db)
+    пересобирается build_index по WatchPaths — сверяем mtime на каждый запрос.
+    """
+    global _LAST_IDX_MTIME
+    try:
+        mt = os.path.getmtime(os.path.join(KB_ROOT, "cache", "kb_index.db"))
+    except OSError:
+        return
+    if _LAST_IDX_MTIME is None:
+        _LAST_IDX_MTIME = mt
+        return
+    if mt == _LAST_IDX_MTIME:
+        return
+    _LAST_IDX_MTIME = mt
+    _cross_search_cached.cache_clear()
+    _page_title.cache_clear()
 
 
 def _cross_search_impl(query, max_answers, limit_per_source):

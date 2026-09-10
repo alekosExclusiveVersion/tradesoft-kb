@@ -6,13 +6,17 @@
 Крупные страницы разбиваются на секции по заголовкам (## / ###).
 """
 import os
+import pickle
 import re
 import sqlite3
+import time
+from multiprocessing import Pool
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KB_ROOT = os.path.dirname(SCRIPT_DIR)
 CACHE_DIR = os.path.join(KB_ROOT, "cache")
 DB_PATH = os.path.join(CACHE_DIR, "kb_index.db")
+PAGE_STEMS_PATH = os.path.join(CACHE_DIR, "page_stems.pkl")
 MAX_CHUNK = 15000
 
 SCHEMA = """
@@ -120,11 +124,66 @@ def rebuild_fts(db):
     )
 
 
+def _prime_page(args):
+    """Стемы страницы и абзацев в формате search.py (для мультипроцессного
+    префилда). Используем константы/токенизатор search.py, чтобы зеркально
+    совпадать с runtime-вычислением (сниппеты, дискриминаторы)."""
+    import search as s
+    from stem import stem_text, stem_word
+    key, text = args
+    stems = [p for p in stem_text(text) if p]
+    paragraphs = [ln.strip() for ln in text.splitlines() if ln.strip()][:s._SNIPPET_PARAS_LIMIT]
+    paras = []
+    for para in paragraphs:
+        words = [stem_word(w.lower()) for w in s.TOKEN_RE.findall(para)]
+        paras.append([para, [w for w in words if w]])
+    return key, stems, paras
+
+
+def prime_page_stems(db_path, workers=6):
+    """Полный предрасчёт page_stems.pkl (формат search.py) по содержимому индекса.
+
+    Поисковый сервер лениво достраивает стемы страниц при запросах; префилд
+    делает холодный старт мгновенным для всех страниц сразу. Пикл привязан
+    к mtime индекса — сервер использует его, только если индекс не менялся.
+    Стоимость полного прогона ~0.15 с/страница; распараллеливается по процессам.
+    """
+    ts = time.time()
+    if os.path.exists(PAGE_STEMS_PATH):
+        os.remove(PAGE_STEMS_PATH)
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    rows = con.execute(
+        "SELECT product, page, content FROM pages ORDER BY product, page, chunk"
+    ).fetchall()
+    con.close()
+    joined = {}
+    for product, page, content in rows:
+        joined.setdefault((product, page), []).append(content or "")
+    items = [(k, "\n".join(v)) for k, v in joined.items()]
+    stemmed, paraed = {}, {}
+    if workers > 1 and len(items) > 128:
+        with Pool(workers) as pool:
+            for key, stems, paras in pool.imap_unordered(_prime_page, items, chunksize=8):
+                stemmed[key] = stems
+                paraed[key] = paras
+    else:
+        for key, stems, paras in (_prime_page(it) for it in items):
+            stemmed[key] = stems
+            paraed[key] = paras
+    payload = {"_mtime": os.path.getmtime(db_path), "stems": stemmed, "paras": paraed}
+    with open(PAGE_STEMS_PATH + ".tmp", "wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(PAGE_STEMS_PATH + ".tmp", PAGE_STEMS_PATH)
+    print(f"page_stems.pkl: {len(stemmed)} страниц за {round(time.time() - ts, 1)} с")
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="Построение/обновление FTS5-индекса")
     ap.add_argument("--rebuild", action="store_true",
                     help="Принудительная полная переиндексация всех страниц")
+    ap.add_argument("--no-prime-stems", action="store_true",
+                    help="Не предрасчитывать page_stems.pkl после пересборки")
     args = ap.parse_args()
 
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -177,6 +236,14 @@ def main():
 
     if changed or removed:
         rebuild_fts(db)
+        db.commit()
+        # данные могут лежать в -wal; сервер читает через WAL, поэтому для инвалидации
+        # его кэшей достаточно сменить mtime основного файла индекса.
+        try:
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            db.commit()
+        except sqlite3.OperationalError:
+            pass  # другой процесс держит БД — и так сойдёт, см. utime ниже
 
     db.commit()
 
@@ -184,7 +251,16 @@ def main():
     db.close()
 
     if changed or removed:
+        # сигнал пересборки для поискового сервера (сброс/пересоздание кэшей)
+        try:
+            os.utime(DB_PATH, None)
+        except OSError:
+            pass
         print(f"Индекс обновлён: изменено {changed}, удалено {removed}, всего чанков {total}")
+        if args.no_prime_stems:
+            print("Префилд стемов пропущен (--no-prime-stems)")
+        else:
+            prime_page_stems(DB_PATH)
     else:
         print("Индекс актуален, переиндексация не требуется")
 

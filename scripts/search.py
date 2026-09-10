@@ -8,6 +8,7 @@
 """
 import argparse
 import os
+import pickle
 import re
 import sqlite3
 import sys
@@ -448,6 +449,7 @@ def _score_row(r, terms, require_all, min_hits=None):
 def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
     if not os.path.exists(DB_PATH):
         sys.exit(f"Индекс не найден: {DB_PATH}. Запустите scripts/build_index.py")
+    _detect_index_change()
     db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
 
     t0 = time.perf_counter()
@@ -788,6 +790,111 @@ def _canonical_query(query):
 
 _PAGE_CONTENT_CACHE = {}
 
+# ---------------------------------------------------------------------------
+# Свежесть кэшей относительно индекса.
+# Индекс (cache/kb_index.db) пересобирается build_index (launchd по WatchPaths),
+# поэтому все in-memory кэши, производные от содержимого страниц (контент, стемы
+# страниц/абзацев, частоты терминов), должны сбрасываться при изменении mtime.
+# ---------------------------------------------------------------------------
+_INDEX_MTIME = None
+
+
+def index_mtime():
+    try:
+        return os.path.getmtime(DB_PATH)
+    except OSError:
+        return 0.0
+
+
+def _detect_index_change():
+    """Сброс кэшей содержимого/стемов, если индекс обновился с прошлого раза."""
+    global _INDEX_MTIME
+    mt = index_mtime()
+    if _INDEX_MTIME is None:
+        _INDEX_MTIME = mt
+        return False
+    if mt == _INDEX_MTIME:
+        return False
+    _INDEX_MTIME = mt
+    # кэши стемов защищены своими блокировками (сохранение на диск итерирует их)
+    with _PAGE_STEMS_LOCK:
+        with _PARAGRAPH_LOCK:
+            _PAGE_STEMS_CACHE.clear()
+            _PARAGRAPH_STEMS.clear()
+    _PAGE_CONTENT_CACHE.clear()
+    DFS_CACHE.clear()
+    return True
+
+
+# Персистентный кэш стемов страниц и абзацев (по образцу stem_lexicon.pkl):
+# морфоразбор содержимого страниц — самый дорогой узел холодного старта поиска
+# (58 страниц кандидатов за один запрос). Страницы статичны, поэтому считаем
+# стемы один раз и сохраняем на диск; инвалидация по mtime индекса (см. выше).
+_PAGE_STEMS_PATH = os.path.join(KB_ROOT, "cache", "page_stems.pkl")
+_PAGE_STEMS_LOADED = False
+_PAGE_STEMS_DIRTY = 0
+_PAGE_STEMS_LAST_SAVE = 0.0
+_PAGE_STEMS_SAVE_TRIGGER = 32  # страниц до принудительного сохранения
+_PAGE_STEMS_SAVE_SECS = 5.0
+_PAGE_STEMS_LOCK = threading.RLock()
+
+
+def _load_page_stems_disk():
+    """Загрузка кэша стемов страниц/абзацев с диска (при совпадении mtime
+    индекса). Лениво, один раз за процесс; должна вызываться под
+    _PAGE_STEMS_LOCK."""
+    global _PAGE_STEMS_LOADED
+    if _PAGE_STEMS_LOADED:
+        return
+    _PAGE_STEMS_LOADED = True
+    try:
+        with open(_PAGE_STEMS_PATH, "rb") as f:
+            saved = pickle.load(f)
+        if not (isinstance(saved, dict) and saved.get("_mtime") == index_mtime()):
+            return
+        for key, v in (saved.get("stems") or {}).items():
+            _PAGE_STEMS_CACHE[key] = set(v)
+        for key, v in (saved.get("paras") or {}).items():
+            _PARAGRAPH_STEMS[key] = [(p, frozenset(w)) for p, w in v]
+    except Exception:
+        pass
+
+
+def _save_page_stems_locked():
+    """Сохранение стемов на диск (атомарно: tmp + rename). Под _PAGE_STEMS_LOCK."""
+    global _PAGE_STEMS_DIRTY, _PAGE_STEMS_LAST_SAVE
+    _PAGE_STEMS_DIRTY = 0
+    _PAGE_STEMS_LAST_SAVE = time.time()
+    payload = {
+        "_mtime": index_mtime(),
+        "stems": {k: sorted(v) for k, v in _PAGE_STEMS_CACHE.items()},
+        "paras": {
+            k: [[p, sorted(w)] for p, w in v]
+            for k, v in _PARAGRAPH_STEMS.items()
+        },
+    }
+    try:
+        tmp = _PAGE_STEMS_PATH + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, _PAGE_STEMS_PATH)
+    except Exception:
+        pass
+
+
+def _mark_stems_dirty_and_save():
+    """Подсчёт грязных страниц и периодическое сохранение (троттлинг).
+
+    Под _PAGE_STEMS_LOCK. Сериализация вызова: если другой поток уже запустил
+    сохранение, его результат покрывает и наши записи — флагов не дублируем.
+    """
+    global _PAGE_STEMS_DIRTY
+    _PAGE_STEMS_DIRTY += 1
+    now = time.time()
+    if (_PAGE_STEMS_DIRTY >= _PAGE_STEMS_SAVE_TRIGGER
+            or now - _PAGE_STEMS_LAST_SAVE >= _PAGE_STEMS_SAVE_SECS):
+        _save_page_stems_locked()
+
 
 def force_row(product, page, stems):
     """Строка результата (product, page, title, path, snippet, score) для
@@ -835,18 +942,30 @@ def _page_content(product, page):
 
 _PAGE_STEMS_CACHE = {}
 
+
 def _page_stems(product, page):
-    """Стеммированные слова страницы (все чанки). Кэшируется."""
+    """Стеммированные слова страницы (все чанки). Кэшируется в памяти и на диск."""
     key = (product, page)
-    if key in _PAGE_STEMS_CACHE:
-        return _PAGE_STEMS_CACHE[key]
-    from stem import stem_text
-    stems = set()
-    for p in stem_text(_page_content(product, page)):
-        if p:
-            stems.add(p)
-    _PAGE_STEMS_CACHE[key] = stems
-    return stems
+    with _PAGE_STEMS_LOCK:
+        cached = _PAGE_STEMS_CACHE.get(key)
+        if cached is not None:
+            return cached
+        _load_page_stems_disk()
+        cached = _PAGE_STEMS_CACHE.get(key)
+        if cached is not None:
+            return cached
+        from stem import stem_text
+        stems = set()
+        for p in stem_text(_page_content(product, page)):
+            if p:
+                stems.add(p)
+        # параллельный поток мог построить ту же страницу — возвращаем его результат
+        existed = _PAGE_STEMS_CACHE.get(key)
+        if existed is not None:
+            return existed
+        _PAGE_STEMS_CACHE[key] = stems
+        _mark_stems_dirty_and_save()
+        return stems
 
 def _page_has_terms(product, page, stems):
     """Содержит ли текст страницы любой из дискриминативных терминов.
@@ -880,20 +999,33 @@ _PARAGRAPH_LOCK = threading.RLock()
 
 
 def _paragraph_stems(product, page, paragraphs):
-    """Стеммы слов каждого абзаца страницы (один раз, потом из кэша)."""
+    """Стеммы слов каждого абзаца страницы (один раз, потом из кэша).
+
+    Порядок блокировок общий для путей стемов страниц и абзацев:
+    всегда _PAGE_STEMS_LOCK снаружи, _PARAGRAPH_LOCK внутри — без вложенного
+    обратного порядка не бывает (сохранение тоже читает оба кэша).
+    """
     key = (product, page)
-    with _PARAGRAPH_LOCK:
-        cached = _PARAGRAPH_STEMS.get(key)
-        if cached is not None:
-            return cached
-        from stem import stem_word
-        out = []
-        for p in paragraphs:
-            words = [stem_word(w.lower()) for w in TOKEN_RE.findall(p)]
-            out.append((p, frozenset(w for w in words if w)))
-        if len(_PARAGRAPH_STEMS) >= _SNIPPET_PARAS_CACHE_MAX:
-            _PARAGRAPH_STEMS.clear()
-        _PARAGRAPH_STEMS[key] = out
+    with _PAGE_STEMS_LOCK:
+        with _PARAGRAPH_LOCK:
+            cached = _PARAGRAPH_STEMS.get(key)
+            if cached is not None:
+                return cached
+        _load_page_stems_disk()
+        with _PARAGRAPH_LOCK:
+            cached = _PARAGRAPH_STEMS.get(key)
+            # загруженный с диска кэш валиден, только если абзацы совпадают по числу
+            if cached is not None and len(cached) == len(paragraphs):
+                return cached
+            from stem import stem_word
+            out = []
+            for p in paragraphs:
+                words = [stem_word(w.lower()) for w in TOKEN_RE.findall(p)]
+                out.append((p, frozenset(w for w in words if w)))
+            if len(_PARAGRAPH_STEMS) >= _SNIPPET_PARAS_CACHE_MAX:
+                _PARAGRAPH_STEMS.clear()
+            _PARAGRAPH_STEMS[key] = out
+        _mark_stems_dirty_and_save()
         return out
 
 
@@ -1021,6 +1153,7 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
       транслит (например «nastrojka onlajn kassy») при этом не ломается, т.к.
       кириллический вариант по качеству не превосходит основной.
     """
+    _detect_index_change()
     if product is None:
         product = detect_product_name(query)
     detected_product = product
