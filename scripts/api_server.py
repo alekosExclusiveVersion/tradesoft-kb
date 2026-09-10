@@ -25,8 +25,12 @@ KB_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, SCRIPT_DIR)
 from cross_search import cross_search
 from intent import detect_intent, detect_product
+from search import _canonical_query
+from access_log import AccessLogger, gen_session_id
 
 PORT = int(os.environ.get("CROSS_SEARCH_PORT", 8055))
+
+_access = AccessLogger()
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -73,6 +77,8 @@ class APIHandler(BaseHTTPRequestHandler):
 
         latency_ms = int((time.time() - t0) * 1000)
 
+        self._log_search(q, result, latency_ms)
+
         response = {
             "query": q,
             "intent": result["intent"],
@@ -83,6 +89,30 @@ class APIHandler(BaseHTTPRequestHandler):
         }
 
         self._send_json(200, response)
+
+    def _log_search(self, q, result, latency_ms):
+        """Пишет запрос в search_events (kb_access.db) для eval-conveyera."""
+        try:
+            canonical, corrected = _canonical_query(q)
+            top = []
+            for a in result.get("answers", []):
+                for b in a.get("blocks", []):
+                    p = b.get("path") or b.get("pp")
+                    if p and p not in top:
+                        top.append(p)
+            _access.log_search(
+                session_id=gen_session_id(), ip=self.client_address[0],
+                q_raw=q, q_canonical=canonical,
+                corrected_type="layout" if corrected else None,
+                product_detected=result.get("product"),
+                product_filter=None,
+                n_results=len(top),
+                top10_pp=json.dumps(top[:10], ensure_ascii=False),
+                n_fts=0, n_vec=0, fts_ms=0.0, vec_ms=0.0, embed_ms=0.0,
+                total_ms=float(latency_ms), vec_source=None,
+                boost=0, rare=None, api_intent=result.get("intent"))
+        except Exception as e:
+            print(f"[api] log_search error: {e}", file=sys.stderr)
 
     def _handle_health(self):
         """Health check."""
