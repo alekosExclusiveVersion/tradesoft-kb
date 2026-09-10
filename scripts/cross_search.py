@@ -553,7 +553,14 @@ def _asks_for_changes(query):
     return any(h in q for h in _CHANGES_HINTS)
 
 
-def merge_results(docs, solutions, crm, max_docs=8, max_solutions=5, max_crm=3):
+# Сколько docs-страниц берём из гибридного поиска в общий пул. RRF считает по
+# топ-30 (RRF_TOP) каждого источника, так что это лишь глубина среза; 8 было
+# мало — после среза в пулах продуктов оставалось по 1-2 страницы, и родственные
+# материалы (все «печать чека» Parts.Resource) не попадали в related_docs.
+DOCS_MERGE_TOP = 24
+
+
+def merge_results(docs, solutions, crm, max_docs=DOCS_MERGE_TOP, max_solutions=5, max_crm=3):
     """Объединяет результаты из 3 источников в единый список.
 
     Скоры разных источников несопоставимы (docs: гибрид/BM25, бывает
@@ -684,6 +691,10 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
     def _best(pool, block_type, exclude=None):
         """Лучший блок заданного типа из пула (сначала по типу, потом по скору)."""
         lst = [b for b in pool if block_type is None or b["block_type"] == block_type]
+        # Кросс-продуктовые RRF-строки (product вида "a,b") в блоки не берём:
+        # пустой контент и product, из которого не собрать ссылку. Их позиция
+        # в пуле сохранена (см. _search_docs), чтобы не сдвигать ранги.
+        lst = [b for b in lst if "," not in (b.get("product") or "")]
         if exclude:
             ex = {id(x) for x in exclude}
             lst = [b for b in lst if id(b) not in ex]
@@ -786,7 +797,8 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
                         # (собраны поиском, но не вошли в единственный блок,
                         # включая фрагменты-дополнения вроде «Правил… по СНО»).
                         sec_docs = [r for r in pools.get("docs", [])
-                                    if r.get("path") != b.get("path")]
+                                    if r.get("path") != b.get("path")
+                                    and "," not in (r.get("product") or "")]
                         sec_docs.sort(key=lambda r: r.get("score", 0), reverse=True)
                         for sd in sec_docs[:5]:
                             if not any(d.get("path") == sd["path"]
@@ -890,11 +902,15 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             # (флаг для группировки в compose), а не фильтром.
             # Запрашиваем больше docs, чтобы в результат попадали страницы
             # разных продуктов (Parts.Intellect, Parts.Resource, Sync...)
-            rows = ds.search(query, None, limit=max(limit_per_source, 8))
+            rows = ds.search(query, None, limit=max(limit_per_source, DOCS_MERGE_TOP))
             if _asks_for_changes(query):
                 return rows
             # Подавляем changelog-шум: страницы *-changes попадают в топ для
             # обычных запросов («как направить seo» → «Версия 6.64»).
+            # Кросс-продуктовые «comma»-строки НЕ вырезаем из пула: их удаление
+            # сдвигает позиционные скоры и ломает порядок групп (например, у
+            # «печать чеков» Sync обгонял Parts.Resource в top-2). Отсеиваем их
+            # при компоновке блоков (см. compose_answers), сохраняя ранги.
             return [r for r in rows
                     if not ("-changes" in (r.get("product") or ""))]
         except Exception as e:
