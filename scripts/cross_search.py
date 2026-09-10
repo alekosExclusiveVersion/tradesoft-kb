@@ -18,6 +18,8 @@ import os
 import sqlite3
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KB_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -30,28 +32,91 @@ sys.path.insert(0, SCRIPT_DIR)
 from intent import detect_intent, detect_product, classify_block, classify_results, Intent
 
 # ---------------------------------------------------------------------------
-# Source adapters
+# Source adapters (lazy singletons)
 # ---------------------------------------------------------------------------
+
+_docs_source = None
+_solutions_source = None
+_crm_source = None
+_cross_links_source = None
+
+
+def _get_docs_source():
+    global _docs_source
+    if _docs_source is None:
+        _docs_source = DocsSource()
+    return _docs_source
+
+
+def _get_solutions_source():
+    global _solutions_source
+    if _solutions_source is None:
+        _solutions_source = SolutionsSource()
+    return _solutions_source
+
+
+def _get_crm_source():
+    global _crm_source
+    if _crm_source is None:
+        _crm_source = CRMSource()
+    return _crm_source
+
+
+def _get_cross_links_source():
+    global _cross_links_source
+    if _cross_links_source is None:
+        _cross_links_source = CrossLinksSource()
+    return _cross_links_source
+
 
 class DocsSource:
     """tradesoft-kb: документация products (FTS5 + vectors)."""
 
-    def __init__(self):
+    def __init__(self, hybrid_timeout_ms=1000):
+        import threading
         from search import search_hybrid
         self._search = search_hybrid
+        self._threading = threading
+        self._hybrid_timeout_ms = hybrid_timeout_ms
 
     def search(self, query, product=None, limit=5):
-        """Возвращает list[dict] с ключами: path, product, title, snippet, score."""
-        rows, _ = self._search(query, product, limit=limit)
+        """Возвращает list[dict] с ключами: path, product, title, snippet, score.
+
+        Использует гибридный поиск с таймаутом: если semantic search не
+        завершился за hybrid_timeout_ms, возвращает результаты FTS-only.
+        """
+        result_holder = [[]]
+
+        def _do_hybrid():
+            try:
+                rows, _ = self._search(query, product, limit=limit)
+                result_holder[0] = rows
+            except Exception:
+                pass
+
+        t = self._threading.Thread(target=_do_hybrid, daemon=True)
+        t.start()
+        t.join(timeout=self._hybrid_timeout_ms / 1000.0)
+
+        # If hybrid timed out, use FTS-only fallback
+        if not result_holder[0]:
+            try:
+                from search import terms, search
+                fts_terms = terms(query)
+                rows, _ = search(fts_terms, product, limit=limit)
+                result_holder[0] = rows
+            except Exception:
+                pass
+
         results = []
-        for row in rows:
+        for row in result_holder[0]:
             # row = [product, page_file, title, path, snippet, score]
             prod = row[0] if len(row) > 0 else ""
-            page = row[1] if len(row) >1 else ""
-            title = row[2] if len(row) >2 else ""
-            path = row[3] if len(row) >3 else ""
-            snippet = row[4] if len(row) >4 else ""
-            score = row[5] if len(row) >5 else 0
+            page = row[1] if len(row) > 1 else ""
+            title = row[2] if len(row) > 2 else ""
+            path = row[3] if len(row) > 3 else ""
+            snippet = row[4] if len(row) > 4 else ""
+            score = row[5] if len(row) > 5 else 0
             results.append({
                 "source": "docs",
                 "path": f"{prod}__{page}",
@@ -68,17 +133,24 @@ class SolutionsSource:
     """ts-b24-knowledge: решения поддержки (FTS5)."""
 
     def __init__(self):
+        import threading
+        self._lock = threading.RLock()
         db_path = os.path.join(KNOWLEDGE_ROOT, "data", "solutions.db")
         if not os.path.exists(db_path):
             self._conn = None
             return
-        self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
+                                     check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA busy_timeout=3000")
 
     def search(self, query, product=None, limit=5):
         if not self._conn:
             return []
+        with self._lock:
+            return self._search_unlocked(query, product, limit)
+
+    def _search_unlocked(self, query, product=None, limit=5):
         tokens = [t for t in query.split() if t][:5]
         if not tokens:
             return []
@@ -148,49 +220,65 @@ class CRMSource:
     """ts-b24: CRM сделки и контекст (FTS5)."""
 
     def __init__(self):
+        import threading
+        self._lock = threading.RLock()
         db_path = os.path.join(CRM_ROOT, "data", "ts_b24.db")
         if not os.path.exists(db_path):
             self._conn = None
             return
-        self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
+                                     check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA busy_timeout=3000")
 
-    def search(self, query, product=None, limit=3):
+    def search(self, query, product=None, limit=3, timeout_ms=1000):
         if not self._conn:
             return []
         q = query.strip()
         if not q:
             return []
 
-        rows = self._conn.execute(
-            "SELECT d.ID, d.TITLE, d.COMPANY_ID, c.TITLE AS company_title, "
-            "d.CATEGORY_ID, d.STAGE_ID, s.NAME AS stage_name, "
-            "d.DATE_CREATE "
-            "FROM deals d "
-            "LEFT JOIN deal_stages s ON s.STATUS_ID = d.STAGE_ID "
-            "LEFT JOIN companies c ON c.ID = d.COMPANY_ID "
-            "WHERE (d.TITLE LIKE ? OR COALESCE(d.COMMENTS,'') LIKE ? OR "
-            "COALESCE(c.TITLE,'') LIKE ?) "
-            "ORDER BY d.DATE_CREATE DESC LIMIT ?",
-            [f"%{q}%"] *3 + [limit]).fetchall()
+        # Use thread + timeout for CRM search (lock guards shared connection)
+        result_holder = [[]]
 
-        results = []
-        for r in rows:
-            results.append({
-                "source": "crm",
-                "path": f"deal_{r['ID']}",
-                "product": "",
-                "title": r["TITLE"] or "",
-                "content": (r["company_title"] or "") + " — " + (r["stage_name"] or ""),
-                "score": 0.5,
-                "url": f"https://b24.tradesoft.ru/crm/deal/details/{r['ID']}/",
-                "deal_id": r["ID"],
-                "company": r["company_title"] or "",
-                "stage": r["stage_name"] or "",
-                "date": r["DATE_CREATE"] or "",
-            })
-        return results
+        def _do_search():
+            with self._lock:
+                try:
+                    rows = self._conn.execute(
+                        "SELECT d.ID, d.TITLE, d.COMPANY_ID, c.TITLE AS company_title, "
+                        "d.CATEGORY_ID, d.STAGE_ID, s.NAME AS stage_name, "
+                        "d.DATE_CREATE "
+                        "FROM deals d "
+                        "LEFT JOIN deal_stages s ON s.STATUS_ID = d.STAGE_ID "
+                        "LEFT JOIN companies c ON c.ID = d.COMPANY_ID "
+                        "WHERE (d.TITLE LIKE ? OR COALESCE(d.COMMENTS,'') LIKE ? OR "
+                        "COALESCE(c.TITLE,'') LIKE ?) "
+                        "ORDER BY d.DATE_CREATE DESC LIMIT ?",
+                        [f"%{q}%"] * 3 + [limit]).fetchall()
+
+                    for r in rows:
+                        result_holder[0].append({
+                            "source": "crm",
+                            "path": f"deal_{r['ID']}",
+                            "product": "",
+                            "title": r["TITLE"] or "",
+                            "content": (r["company_title"] or "") + " — " + (r["stage_name"] or ""),
+                            "score": 0.5,
+                            "url": f"https://b24.tradesoft.ru/crm/deal/details/{r['ID']}/",
+                            "deal_id": r["ID"],
+                            "company": r["company_title"] or "",
+                            "stage": r["stage_name"] or "",
+                            "date": r["DATE_CREATE"] or "",
+                        })
+                except Exception:
+                    pass
+
+        import threading
+        t = threading.Thread(target=_do_search, daemon=True)
+        t.start()
+        t.join(timeout=timeout_ms / 1000.0)
+
+        return result_holder[0]
 
 
 # ---------------------------------------------------------------------------
@@ -201,37 +289,48 @@ class CrossLinksSource:
     """Cross-links между решениями и документацией."""
 
     def __init__(self):
+        import threading
+        self._lock = threading.RLock()
         db_path = os.path.join(KB_ROOT, "cache", "cross_links.db")
         if not os.path.exists(db_path):
             self._conn = None
             return
-        self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        self._conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
+                                     check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
 
     def get_related_docs(self, solution_id, limit=3):
         """Для решения возвращает связанные страницы документации."""
         if not self._conn:
             return []
-        rows = self._conn.execute("""
-            SELECT doc_path, doc_product, doc_title, bm25_score
-            FROM solution_to_doc
-            WHERE solution_id = ?
-            ORDER BY bm25_score DESC
-            LIMIT ?
-        """, (str(solution_id), limit)).fetchall()
+        with self._lock:
+            try:
+                rows = self._conn.execute("""
+                    SELECT doc_path, doc_product, doc_title, bm25_score
+                    FROM solution_to_doc
+                    WHERE solution_id = ?
+                    ORDER BY bm25_score DESC
+                    LIMIT ?
+                """, (str(solution_id), limit)).fetchall()
+            except Exception:
+                return []
         return [dict(r) for r in rows]
 
     def get_related_solutions(self, doc_path, limit=3):
         """Для страницы документации возвращает связанные решения."""
         if not self._conn:
             return []
-        rows = self._conn.execute("""
-            SELECT solution_id, solution_title, solution_product, bm25_score
-            FROM doc_to_solution
-            WHERE doc_path = ?
-            ORDER BY bm25_score DESC
-            LIMIT ?
-        """, (doc_path, limit)).fetchall()
+        with self._lock:
+            try:
+                rows = self._conn.execute("""
+                    SELECT solution_id, solution_title, solution_product, bm25_score
+                    FROM doc_to_solution
+                    WHERE doc_path = ?
+                    ORDER BY bm25_score DESC
+                    LIMIT ?
+                """, (doc_path, limit)).fetchall()
+            except Exception:
+                return []
         return [dict(r) for r in rows]
 
 
@@ -381,8 +480,15 @@ def compose_answers(results, intent, max_answers=2, cross_links=None):
 # Main search function
 # ---------------------------------------------------------------------------
 
+# LRU cache for repeated queries (maxsize=128, ttl handled by caller)
+@lru_cache(maxsize=128)
+def _cross_search_cached(query, max_answers, limit_per_source):
+    """Кешированный inner cross_search (ключ = query + params)."""
+    return _cross_search_impl(query, max_answers, limit_per_source)
+
+
 def cross_search(query, max_answers=2, limit_per_source=5):
-    """Единый поиск из 3 источников.
+    """Единый поиск из 3 источников (с кешем).
 
     Возвращает dict с ключами:
       - answers: list[Answer] — структурированные ответы
@@ -391,65 +497,99 @@ def cross_search(query, max_answers=2, limit_per_source=5):
       - latency_ms: int — время выполнения
     """
     t0 = time.time()
+    result = _cross_search_cached(query, max_answers, limit_per_source)
+    result["latency_ms"] = int((time.time() - t0) * 1000)
+    return result
+
+
+def _cross_search_impl(query, max_answers, limit_per_source):
+    """Основная логика поиска (вызывается из кеша или напрямую)."""
+    t0 = time.time()
 
     # 1. Intent + Product detection
     intent = detect_intent(query)
     product = detect_product(query)
+
+    # Map canonical product ID to docs product name
+    DOCS_PRODUCT_MAP = {
+        "parts_resource": "parts-resource-guide",
+        "parts_intellect": "parts-intellect-guide",
+        "sync": "parts-intellect-synch",
+        "diadok": "diadok",
+        "seo": "seo-guide",
+        "delivery": "delivery_schedule",
+        "wazzup": "wazzup",
+        "tsd": "tsd",
+        "marketplace": "marketplace",
+    }
+    docs_product = DOCS_PRODUCT_MAP.get(product) if product else None
+    sol_product = product  # solutions DB uses same canonical IDs
 
     # 2. Parallel retrieval from all sources
     doc_results = []
     sol_results = []
     crm_results = []
 
-    # Map canonical product ID to docs product name
-    docs_product = None
-    if product:
-        DOCS_PRODUCT_MAP = {
-            "parts_resource": "parts-resource-guide",
-            "parts_intellect": "parts-intellect-guide",
-            "sync": "parts-intellect-synch",
-            "diadok": "diadok",
-            "seo": "seo-guide",
-            "delivery": "delivery_schedule",
-            "wazzup": "wazzup",
-            "tsd": "tsd",
-            "marketplace": "marketplace",
+    def _search_docs():
+        try:
+            ds = _get_docs_source()
+            return ds.search(query, docs_product, limit=limit_per_source)
+        except Exception as e:
+            print(f"[docs] error: {e}", file=sys.stderr)
+            return []
+
+    def _search_solutions():
+        try:
+            sol = _get_solutions_source()
+            return sol.search(query, sol_product, limit=limit_per_source)
+        except Exception as e:
+            print(f"[solutions] error: {e}", file=sys.stderr)
+            return []
+
+    def _search_crm():
+        try:
+            crm = _get_crm_source()
+            return crm.search(query, product, limit=3, timeout_ms=1500)
+        except Exception as e:
+            print(f"[crm] error: {e}", file=sys.stderr)
+            return []
+
+    # Parallel execution
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(_search_docs): "docs",
+            executor.submit(_search_solutions): "solutions",
+            executor.submit(_search_crm): "crm",
         }
-        docs_product = DOCS_PRODUCT_MAP.get(product)
-
-    # Map canonical product ID to solutions product name (same canonical IDs)
-    sol_product = product  # solutions DB uses same canonical IDs
-
-    try:
-        ds = DocsSource()
-        doc_results = ds.search(query, docs_product, limit=limit_per_source)
-    except Exception as e:
-        print(f"[docs] error: {e}", file=sys.stderr)
-
-    try:
-        sol = SolutionsSource()
-        sol_results = sol.search(query, sol_product, limit=limit_per_source)
-    except Exception as e:
-        print(f"[solutions] error: {e}", file=sys.stderr)
-
-    try:
-        crm = CRMSource()
-        crm_results = crm.search(query, product, limit=3)
-    except Exception as e:
-        print(f"[crm] error: {e}", file=sys.stderr)
+        for future in as_completed(futures):
+            source = futures[future]
+            try:
+                result = future.result()
+                if source == "docs":
+                    doc_results = result
+                elif source == "solutions":
+                    sol_results = result
+                elif source == "crm":
+                    crm_results = result
+            except Exception as e:
+                print(f"[{source}] future error: {e}", file=sys.stderr)
 
     # 3. Merge + Compose with cross-links
     merged = merge_results(doc_results, sol_results, crm_results)
 
-    # Initialize cross-links source
     cross_links = None
     try:
-        cross_links = CrossLinksSource()
+        cross_links = _get_cross_links_source()
     except Exception as e:
         print(f"[cross-links] init error: {e}", file=sys.stderr)
 
-    answers = compose_answers(merged, intent, max_answers=max_answers,
-                              cross_links=cross_links)
+    try:
+        answers = compose_answers(merged, intent, max_answers=max_answers,
+                                  cross_links=cross_links)
+    except Exception as e:
+        print(f"[compose] error: {e}", file=sys.stderr)
+        answers = compose_answers(merged, intent, max_answers=max_answers,
+                                  cross_links=None)
 
     latency_ms = int((time.time() - t0) * 1000)
 

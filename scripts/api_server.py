@@ -56,12 +56,21 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         max_answers = int(params.get("max", ["2"])[0])
-        product = params.get("product", ["auto"])[0]
-        if product == "auto":
-            product = None
 
         t0 = time.time()
-        result = cross_search(q, max_answers=max_answers, limit_per_source=5)
+        try:
+            result = cross_search(q, max_answers=max_answers, limit_per_source=5)
+        except Exception as e:
+            print(f"[api] error: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            self._send_json(500, {
+                "error": str(e),
+                "query": q,
+                "latency_ms": int((time.time() - t0) * 1000),
+            })
+            return
+
         latency_ms = int((time.time() - t0) * 1000)
 
         response = {

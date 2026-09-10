@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradesoft.cross-search-api</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/aleksei/Work/tradesoft-kb/.venv/bin/python</string>
+        <string>/Users/aleksei/Work/tradesoft-kb/scripts/api_server.py</string>
+        <string>--port</string>
+        <string>8055</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/aleksei/Work/tradesoft-kb</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/aleksei/Work/tradesoft-kb/logs/api_server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/aleksei/Work/tradesoft-kb/logs/api_server.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+</dict>
+</plist>

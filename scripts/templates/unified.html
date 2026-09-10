@@ -135,6 +135,11 @@ function renderResults(data) {
     const el = document.getElementById('results');
     const stats = document.getElementById('stats');
 
+    if (data.error) {
+        el.innerHTML = `<div class="empty"><h2>Ошибка сервера</h2><p>${escapeHtml(data.error)}</p></div>`;
+        return;
+    }
+
     if (!data.answers || data.answers.length === 0) {
         el.innerHTML = '<div class="empty"><h2>Ничего не найдено</h2></div>';
         return;
