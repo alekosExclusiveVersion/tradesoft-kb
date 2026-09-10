@@ -11,6 +11,7 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -868,6 +869,33 @@ def _page_has_terms(product, page, stems):
 
 _SNIPPET_MAX = 320
 
+# Снниппет-кэш: стемы слов абзаца по странице. Морфоразбор (pymorphy3) слов
+# абзаца — самый дорогой узел горячего пути (до 2.5с на запрос: 30 страниц ×
+# абзацы × слова). Текст страниц статичен, поэтому стемы абзаца считаем один
+# раз на страницу и переиспользуем во всех следующих запросах.
+_SNIPPET_PARAS_LIMIT = 200  # дальше по странице сниппету делать нечего
+_SNIPPET_PARAS_CACHE_MAX = 6144
+_PARAGRAPH_STEMS = {}  # (product, page) -> [(text, frozenset(word_stems)), ...]
+_PARAGRAPH_LOCK = threading.RLock()
+
+
+def _paragraph_stems(product, page, paragraphs):
+    """Стеммы слов каждого абзаца страницы (один раз, потом из кэша)."""
+    key = (product, page)
+    with _PARAGRAPH_LOCK:
+        cached = _PARAGRAPH_STEMS.get(key)
+        if cached is not None:
+            return cached
+        from stem import stem_word
+        out = []
+        for p in paragraphs:
+            words = [stem_word(w.lower()) for w in TOKEN_RE.findall(p)]
+            out.append((p, frozenset(w for w in words if w)))
+        if len(_PARAGRAPH_STEMS) >= _SNIPPET_PARAS_CACHE_MAX:
+            _PARAGRAPH_STEMS.clear()
+        _PARAGRAPH_STEMS[key] = out
+        return out
+
 
 def smart_snippet(product, page, stems, max_len=_SNIPPET_MAX):
     """Связный сниппет по полному тексту страницы.
@@ -878,42 +906,36 @@ def smart_snippet(product, page, stems, max_len=_SNIPPET_MAX):
     терминов, якоря на границу абзаца и подсвечиваем термины маркерами ⟦⟧
     (clean_snippet потом превращает их в жирный).
     """
-    from stem import stem_word
     content = _page_content(product, page)
     if not content or not stems:
         return ""
-    paragraphs = [ln.strip() for ln in content.splitlines() if ln.strip()]
+    paragraphs = [ln.strip() for ln in content.splitlines()
+                  if ln.strip()][:_SNIPPET_PARAS_LIMIT]
     if not paragraphs:
         return ""
+    para = _paragraph_stems(product, page, paragraphs)
+    para_stems = [w for _, w in para]
 
-    def paragraph_score(p):
-        words = [w.lower() for w in TOKEN_RE.findall(p)]
-        if not words:
-            return 0, 0
-        matched = set()
-        for w in words:
-            ww = stem_word(w)
-            if not ww:
-                continue
-            for t in stems:
-                if t in matched:
-                    continue
-                if ww == t or ww.startswith(t) or t.startswith(ww):
-                    matched.add(t)
-        covered = len(matched)
-        return covered, covered - max(0, len(p) - max_len) / 200.0
+    def paragraph_score(i):
+        wstems = para_stems[i]
+        text = para[i][0]
+        matched = 0
+        for t in stems:
+            if any(w == t or w.startswith(t) or t.startswith(w) for w in wstems):
+                matched += 1
+        return matched, matched - max(0, len(text) - max_len) / 200.0
 
-    best_p, best_score, best_text = None, (-1, -1), ""
-    for p in paragraphs:
-        score = paragraph_score(p)
+    best_p, best_i, best_score = None, -1, (-1, -1)
+    for i in range(len(paragraphs)):
+        score = paragraph_score(i)
         # предпочитаем абзац с максимальным покрытием; при равенстве — более ранний
         if score[0] > best_score[0] or (
             score[0] == best_score[0] and score[1] > best_score[1]):
             best_score = score
-            best_p = p
-    if best_p is None:
+            best_i = i
+    if best_i < 0:
         return ""
-    best_text = best_p
+    best_text = paragraphs[best_i]
     if len(best_text) > max_len:
         best_text = best_text[:max_len].rstrip() + "…"
     # подсветка терминов маркерами (как в clean_snippet, который переводит их в <b>)
@@ -1085,8 +1107,10 @@ def _hybrid_inner(query, product, limit, snippets, embed_host):
     t0 = time.perf_counter()
     norm_terms = normalize_terms(terms(query))
 
-    # 1) FTS5 results
-    fts_rows, _ = search(terms(query), product, limit=RRF_TOP, snippets=snippets)
+    # 1) FTS5 results (сниппет не строим здесь — заполним его для итоговых
+    #    строк ниже: из 30 кандидатов RRF/дедуп берёт ~24, и морфоразбор
+    #    абзацев для отброшенных был чистым перерасходом CPU/GIL).
+    fts_rows, _ = search(terms(query), product, limit=RRF_TOP, snippets=False)
 
     # 2) Vector results (по canonical-запросу: нижний регистр + исправление
     #    опечаток — иначе embed видит регистр/опечатки и искажает соседей).
@@ -1128,6 +1152,7 @@ def _hybrid_inner(query, product, limit, snippets, embed_host):
     fts_by_key = {(r[0], r[1]): r for r in fts_rows}
     vec_by_key = {(r[0], r[1]): r for r in vec_rows}
     out = []
+    snippet_stems = _correct_terms(norm_terms) if snippets else []
     for key in merged:
         row = None
         if key in fts_by_key:
@@ -1141,6 +1166,11 @@ def _hybrid_inner(query, product, limit, snippets, embed_host):
             row = list(row)
             row[0] = ",".join(page_products[pg])  # comma-separated products
             row[4] = ""  # clear snippet for deduped
+            row = tuple(row)
+        elif snippets and snippet_stems and not row[4]:
+            # Сниппет для итоговых строк (в т.ч. векторных, у них его нет).
+            row = list(row)
+            row[4] = smart_snippet(row[0], row[1], snippet_stems)
             row = tuple(row)
         out.append(row)
 
