@@ -1,5 +1,5 @@
 {
- "note": "Real-log eval 2026-09-10: новые чистые запросы из search_events (kb_access.db), не вошедшие в основной набор. Разметка expected вручную по страницам документации + проверка top-результатов. Длинные запросы про маркировку/ЭДО уже покрыты базовым eval_queries.json.",
+ "note": "Real-log eval 2026-09-10: чистые запросы из search_events (kb_access.db). Разметка expected по top-выдаче + ручная проверка. Длинные запросы про маркировку/ЭДО покрыты eval_queries.json.",
  "queries": [
   {
    "q": "автоимопрт заказов",
@@ -58,6 +58,21 @@
     "parts-resource-guide__nastrojka_sposobov_oplaty.htm.md",
     "parts-resource-guide__nastrojka_ikonok_platezhnykh_sistem.htm.md",
     "solution85831"
+   ]
+  },
+  {
+   "q": "настройка онлайн кассы",
+   "expected": [
+    "parts-resource-guide__nastrojka_onlajn_kassy.htm.md",
+    "parts-intellect-guide__osobennosti_nastroek_podklyucheniya_onlajn_kass_s_peredachej_dannykh.htm.md",
+    "parts-resource-guide__onlajn_kassy_nastrojki_internet_magazina.htm.md"
+   ]
+  },
+  {
+   "q": "как выгрузить товары на авито",
+   "expected": [
+    "marketplace__dobavlenie_tovarov_na_marketplejs_avito.htm.md",
+    "parts-intellect-guide__vygruzka_kataloga_tovarov_na_sajt_avito.htm.md"
    ]
   }
  ]
