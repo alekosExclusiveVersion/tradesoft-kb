@@ -69,6 +69,36 @@ def _get_cross_links_source():
     return _cross_links_source
 
 
+def _build_doc_url(product, page):
+    """Абсолютный URL страницы на product-doc.tradesoft.ru.
+
+    docs-продукт -> (раздел, подраздел) карты сайта product-doc. Имена страниц
+    Храним с суффиксом .htm.md, на сайте они публикуются как .htm.
+    """
+    base, sub = PRODUCT_DOC_SECTIONS.get(product, (product, product))
+    stem = page[:-3] if page.endswith(".md") else page
+    return f"https://product-doc.tradesoft.ru/{base}/{sub}/{stem}"
+
+
+# product-doc.tradesoft.ru: соответствие docs-продукт -> (раздел, подраздел).
+# Собрано с заскрейпленных .md.imgs (реальные URL картинок тех же статей).
+PRODUCT_DOC_SECTIONS = {
+    "parts-intellect-guide": ("ai", "ai"),
+    "parts-intellect-synch": ("ai", "synch"),
+    "parts-intellect-changes": ("ai", "changes"),
+    "parts-index-rest-api": ("ai", "rest_api"),
+    "delivery_schedule": ("ai", "delivery_schedule"),
+    "diadok": ("ai", "diadok"),
+    "marketplace": ("ai", "marketplace"),
+    "tsd": ("ai", "tsd"),
+    "wazzup": ("ai", "other"),
+    "parts-resource-guide": ("ar", "ar"),
+    "parts-resource-changes": ("ar", "changes"),
+    "parts-resource-rest-api": ("ar", "rest_api"),
+    "seo-guide": ("ar", "online_guides"),
+}
+
+
 def _build_excerpt(product, snippet, full_text, max_len=400):
     """Осмысленный эксцерпт для отображения.
 
@@ -168,7 +198,7 @@ class DocsSource:
                 "content": snippet or "",
                 "content_full": "",
                 "score": score,
-                "url": f"https://docs.tradesoft.ru/{prod}/{page}",
+                "url": _build_doc_url(prod, page),
             }
             results.append(entry)
             pending.append(entry)

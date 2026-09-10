@@ -67,18 +67,50 @@ header p { color: var(--fg2); margin-top: 8px; font-size: 14px; }
               color: var(--fg2); margin-bottom: 8px; }
 .block-source { font-size: 11px; color: var(--fg3); margin-bottom: 8px; }
 .block-content { font-size: 14px; line-height: 1.6; color: var(--fg); }
-.block-content code { background: var(--bg); padding: 2px 6px; border-radius: 3px;
+.block-content code, .block-full code { background: var(--bg); padding: 2px 6px;
+                      border-radius: 3px; font-size: 13px; font-family: ui-monospace,
+                      SFMono-Regular, Menlo, monospace; }
+.block-content a, .block-full a { color: var(--accent); }
+.block-content p, .block-full p { margin: 8px 0; }
+.block-content h2, .block-full h2,
+.block-content h3, .block-full h3 { font-size: 16px; margin: 18px 0 8px;
+                      color: var(--fg); padding-bottom: 4px;
+                      border-bottom: 1px solid var(--border); }
+.block-content h4, .block-full h4 { font-size: 15px; margin: 16px 0 6px; color: var(--fg); }
+.block-content h5, .block-full h5,
+.block-content h6, .block-full h6 { font-size: 14px; margin: 12px 0 6px;
+                      color: var(--fg2); text-transform: uppercase; letter-spacing: .04em; }
+.block-content ul, .block-full ul { margin: 8px 0; padding-left: 22px; list-style: disc; }
+.block-content ol, .block-full ol { margin: 8px 0; padding-left: 22px; list-style: decimal; }
+.block-content li, .block-full li { margin: 4px 0; }
+.block-content li > ul, .block-full li > ul,
+.block-content li > ol, .block-full li > ol { margin: 4px 0; }
+.block-content hr, .block-full hr { border: none; border-top: 1px solid var(--border);
+                      margin: 14px 0; }
+.block-content blockquote, .block-full blockquote { border-left: 3px solid var(--border);
+                      padding: 2px 12px; margin: 8px 0; color: var(--fg2); }
+.block-content pre.code-blk { background: var(--bg); border: 1px solid var(--border);
+                      border-radius: var(--radius); padding: 12px; overflow-x: auto;
+                      font-size: 13px; margin: 10px 0;
+                      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.block-content .table-wrap, .block-full .table-wrap { overflow-x: auto; margin: 10px 0; }
+.block-content table, .block-full table { border-collapse: collapse; width: 100%;
                       font-size: 13px; }
+.block-content th, .block-full th,
+.block-content td, .block-full td { border: 1px solid var(--border);
+                      padding: 6px 10px; text-align: left; vertical-align: top; }
+.block-content th, .block-full th { background: var(--bg); font-weight: 600; }
+.block-content tr:nth-child(even) td, .block-full tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+.block-content img, .block-full img { max-width: 100%; height: auto;
+                      border: 1px solid var(--border); border-radius: 4px;
+                      margin: 8px 0; display: block; }
+.block-content .img-line, .block-full .img-line { text-align: center; }
 .block-more { display: inline-block; margin-top: 10px; font-size: 13px;
               color: var(--accent); text-decoration: none; cursor: pointer; }
 .block-more:hover { text-decoration: underline; }
 .block-full { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);
               font-size: 14px; line-height: 1.6; color: var(--fg); }
 .block-full.hidden { display: none; }
-.block-full h4 { font-size: 14px; margin: 14px 0 6px; color: var(--fg); }
-.block-full li { margin: 3px 0 3px 20px; }
-.block-full code { background: var(--bg); padding: 2px 6px; border-radius: 3px;
-                   font-size: 13px; }
 
 /* Related */
 .related { margin-top: 12px; font-size: 13px; color: var(--fg2); }
@@ -219,7 +251,7 @@ function renderResults(data) {
                 html += ` — <a href="${block.url}" target="_blank">источник</a>`;
             }
             html += `</div>`;
-            html += `<div class="block-content">${renderContent(block.content)}</div>`;
+            html += `<div class="block-content">${renderContent(block.content, docBase(block.path))}</div>`;
             if (block.source === 'docs' && block.path &&
                 (block.content || '').length < 1200) {
                 html += `<a href="#" class="block-more" data-path="${escapeHtml(block.path)}">Развернуть полную инструкцию</a>`;
@@ -283,7 +315,7 @@ function toggleFull(link) {
                 if (data.error) {
                     fullDiv.innerHTML = `<em>${escapeHtml(data.error)}</em>`;
                 } else {
-                    fullDiv.innerHTML = renderContent(data.content);
+                    fullDiv.innerHTML = renderContent(data.content, docBase(data.path || link.dataset.path));
                 }
                 fullDiv.dataset.loaded = '1';
                 fullDiv.classList.remove('hidden');
@@ -314,23 +346,185 @@ function sourceLabel(source) {
     return labels[source] || source;
 }
 
-function renderContent(text) {
+// product-doc.tradesoft.ru: соответствие docs-продукт -> (раздел, подраздел)
+const DOC_SECTIONS = {
+    'parts-intellect-guide': ['ai', 'ai'],
+    'parts-intellect-synch': ['ai', 'synch'],
+    'parts-intellect-changes': ['ai', 'changes'],
+    'parts-index-rest-api': ['ai', 'rest_api'],
+    'delivery_schedule': ['ai', 'delivery_schedule'],
+    'diadok': ['ai', 'diadok'],
+    'marketplace': ['ai', 'marketplace'],
+    'tsd': ['ai', 'tsd'],
+    'wazzup': ['ai', 'other'],
+    'parts-resource-guide': ['ar', 'ar'],
+    'parts-resource-changes': ['ar', 'changes'],
+    'parts-resource-rest-api': ['ar', 'rest_api'],
+    'seo-guide': ['ar', 'online_guides'],
+};
+
+function renderContent(text, base) {
     if (!text) return '<em>нет контента</em>';
-    // Simple markdown-ish rendering
-    return escapeHtml(text)
-        .replace(/^#{1,3} (.*)$/gm, '<h4>$1</h4>')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/`(.*?)`/g, '<code>$1</code>')
-        .replace(/^- (.*)$/gm, '<li>$1</li>')
-        .replace(/\n/g, '<br>');
+    const lines = escapeHtml(text).split('\n');
+    let html = '';
+    let i = 0;
+    const n = lines.length;
+    while (i < n) {
+        const line = lines[i];
+        const t = line.trim();
+        if (!t) { i++; continue; }
+
+        // Блок кода
+        if (/^```/.test(t)) {
+            const buf = [];
+            i++;
+            while (i < n && !/^```/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+            i++;
+            html += `<pre class="code-blk">${buf.join('\n')}</pre>`;
+            continue;
+        }
+
+        // Заголовки: # — h2, ## — h3, ### — h4, #### — h5, ##### — h6
+        const h = t.match(/^(#{1,5})\s+(.+)$/);
+        if (h) {
+            const lvl = Math.min(1 + h[1].length, 6);
+            html += `<h${lvl}>${inline(h[2].trim(), base)}</h${lvl}>`;
+            i++; continue;
+        }
+
+        // Горизонтальная линия
+        if (/^(-{3,}|\*{3,})$/.test(t)) { html += '<hr>'; i++; continue; }
+
+        // Списки
+        if (/^\s*[-*] |^\s*\d+[.)] /.test(line)) {
+            const r = renderList(lines, i, base);
+            html += r.html;
+            i = r.next;
+            continue;
+        }
+
+        // Таблица
+        if (t.indexOf('|') !== -1) {
+            const tb = renderTable(lines, i, base);
+            if (tb) { html += tb.html; i = tb.next; continue; }
+        }
+
+        // Строка-картинка
+        const aimg = t.match(/^!\[([^\]]*)\]\(([^)]*)\)$/);
+        if (aimg) { html += `<p class="img-line">${imgHtml(aimg[1], aimg[2], base)}</p>`; i++; continue; }
+
+        html += `<p>${inline(t, base)}</p>`;
+        i++;
+    }
+    return html;
+}
+
+function renderList(lines, start, base) {
+    const items = [];
+    let i = start;
+    while (i < lines.length) {
+        const m = lines[i].match(/^(\s*)([-*]|\d+[.)])\s+(.*)$/);
+        if (!m) break;
+        items.push({ indent: m[1].length, ul: (m[2] === '-' || m[2] === '*'), text: m[3] });
+        i++;
+    }
+    let html = '';
+    const stack = [{ indent: -1, ul: true }];
+    for (const it of items) {
+        while (stack.length > 1 && stack[stack.length - 1].indent > it.indent) {
+            html += `</${stack.pop().ul ? 'ul' : 'ol'}>`;
+        }
+        if (stack[stack.length - 1].indent < it.indent) {
+            stack.push({ indent: it.indent, ul: it.ul });
+            html += `<${it.ul ? 'ul' : 'ol'}>`;
+        }
+        html += `<li>${inline(it.text, base)}</li>`;
+    }
+    while (stack.length > 1) { html += `</${stack.pop().ul ? 'ul' : 'ol'}>`; }
+    return { html, next: i };
+}
+
+function renderTable(lines, start, base) {
+    const split = (t) => t.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    let rows = [];
+    let i = start;
+    while (i < lines.length) {
+        const t = lines[i].trim();
+        if (!t || t.indexOf('|') === -1) break;
+        if (/^[-: |]+$/.test(t)) {
+            rows.push({ cells: split(t), sep: true });
+        } else {
+            rows.push({ cells: split(t), sep: false });
+        }
+        i++;
+    }
+    if (rows.length < 2) return null;
+    const head = rows.find(r => !r.sep);
+    if (!head) return null;
+    let html = '<div class="table-wrap"><table>';
+    html += '<thead><tr>' + head.cells.map(c => `<th>${inline(c || '', base)}</th>`).join('') + '</tr></thead>';
+    html += '<tbody>';
+    for (const r of rows) {
+        if (r === head || r.sep) continue;
+        html += '<tr>' + r.cells.map(c => `<td>${inline(c || '', base)}</td>`).join('') + '</tr>';
+    }
+    html += '</tbody></table></div>';
+    return { html, next: i };
+}
+
+function inline(text, base) {
+    // Сначала защищаем инлайн-код от форматирования внутри
+    const codes = [];
+    text = text.replace(/`([^`]*)`/g, (m, code) => {
+        codes.push(code);
+        return '\uE000' + (codes.length - 1) + '\uE001';
+    });
+    text = text.replace(/(?:!\[([^\]]*)\]\(([^)]*)\)|\[([^\]]*)\]\(([^)]*)\))/g,
+        (m, imgAlt, imgSrc, linkText, linkUrl) => {
+            if (imgSrc) return imgHtml(imgAlt, imgSrc, base);
+            return linkHtml(linkText, linkUrl);
+        });
+    if (codes.length) {
+        text = text.replace(/\uE000(\d+)\uE001/g, (m, idx) => `<code>${codes[+idx]}</code>`);
+    }
+    return text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+               .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+}
+
+function linkHtml(text, url) {
+    if (!url) return escapeHtml(text || '');
+    const safe = url.replace(/javascript:/gi, '');
+    if (/^https?:\/\//.test(safe) || safe.startsWith('/')) {
+        return `<a href="${safe}" target="_blank" rel="noopener">${escapeHtml(text || url)}</a>`;
+    }
+    return escapeHtml(text || url);
+}
+
+function imgHtml(alt, src, base) {
+    let full = src;
+    if (!/^https?:\/\//.test(src)) {
+        // Картинки статей лежат рядом со страницей (имя файла без подпапки)
+        full = (base || '') + src.split('/').pop();
+    }
+    return `<a class="img" href="${full}" target="_blank" rel="noopener">` +
+           `<img src="${full}" alt="${escapeHtml(alt || '')}" loading="lazy"></a>`;
 }
 
 function docUrl(path) {
-    const parts = path.split('__');
-    if (parts.length === 2) {
-        return `https://docs.tradesoft.ru/${parts[0]}/${parts[1]}`;
-    }
-    return '#';
+    const i = String(path || '').indexOf('__');
+    if (i < 1) return '#';
+    const product = path.slice(0, i);
+    const page = path.slice(i + 2);
+    const sec = DOC_SECTIONS[product];
+    const stem = page.endsWith('.md') ? page.slice(0, -3) : page;
+    const base = sec
+        ? `https://product-doc.tradesoft.ru/${sec[0]}/${sec[1]}`
+        : `https://product-doc.tradesoft.ru/${product}/${product}`;
+    return `${base}/${stem}`;
+}
+
+function docBase(path) {
+    return docUrl(path).replace(/[^/]*$/, '');
 }
 
 function escapeHtml(text) {
