@@ -108,6 +108,38 @@ ROUTING_RULES = [
     # маркировкой появилась в 5.25, ожидается сначала «что нового».
     (("вывес", "оборот", "диадок"),
      "parts-intellect-changes", "versiya_5_25.htm.md"),
+    # Печать ценников и этикеток (отчёт-шаблон vs экспорт прайс-листа).
+    (("напечат", "ценник", "этикетк"),
+     "parts-intellect-guide", "pechat_tsennikov_i_ehtiketok.htm.md"),
+    # Перевод на PostgreSQL (создание базы vs проверка/резервные копии).
+    (("postgresql", "база"),
+     "parts-intellect-guide", "sozdanie_bazy_dannykh_na_postgresql.htm.md"),
+    # Сбор логов для диагностики (конкретная утилита vs журнал веб-запросов).
+    (("собр", "лог", "диагностик"),
+     "parts-intellect-guide", "sbor_tekhnicheskoj_diagnosticheskoj_informatsii__logov_.htm.md"),
+    # Товары на Avito (marketplace-страница, force-row при перезаписи wide-fallback).
+    (("авить",),
+     "marketplace", "dobavlenie_tovarov_na_marketplejs_avito.htm.md"),
+    # Яндекс.Маркет (thin-страница, force-row при перезаписи wide-fallback).
+    (("яндекс", "маркет"),
+     "marketplace", "yandeks_market.htm.md"),
+    # Добавить новость на сайт (не «настроить новостную рассылку»).
+    (("добав", "новос", "сайт"),
+     "parts-resource-guide", "dobavlenie_novostej.htm.md",
+     ("рассыл",)),
+    # Восстановить пароль покупателя (resource-сайт, не общая клиент. часть).
+    (("восстанов", "пароль", "покупатель"),
+     "parts-resource-guide", "vosstanovlenie_parolya_po_email.htm.md"),
+    # Загрузить прайс-лист от поставщика в ресурс (не правило/автоимпорт).
+    (("загруз", "прайс", "поставщик"),
+     "parts-resource-guide", "zagruzka_prajs_listov_ot_postavshchikov.htm.md",
+     ("автоимпорт", "правил", "почт")),
+    # Передача прайс-листов из интеллекта на сайт ресурс (synch product).
+    (("перед", "прайс", "интеллект", "ресурс"),
+     "parts-intellect-synch", "peredacha_prajs_listov_iz_parts_intellect_v_parts_resource.htm.md"),
+    # Синхронизация интеллекта с ресурсом (intellect-guide overview vs synch-изменения).
+    (("синхронизаци", "интеллект", "ресурс"),
+     "parts-intellect-guide", "sinkhronizatsiya_s_parts_resource.htm.md"),
 ]
 ROUTING_MAX_POS = 30
 
