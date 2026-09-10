@@ -43,6 +43,8 @@ class APIHandler(BaseHTTPRequestHandler):
 
         if path == "/api/answer":
             self._handle_answer(params)
+        elif path == "/api/page":
+            self._handle_page(params)
         elif path == "/api/health":
             self._handle_health()
         elif path == "/api/meta":
@@ -113,6 +115,49 @@ class APIHandler(BaseHTTPRequestHandler):
                 boost=0, rare=None, api_intent=result.get("intent"))
         except Exception as e:
             print(f"[api] log_search error: {e}", file=sys.stderr)
+
+    def _handle_page(self, params):
+        """Полный контент документа-страницы из kb_index.db.
+
+        Параметры: path="product__page.htm.md" или product=...&page=...
+        """
+        import sqlite3
+        path = params.get("path", [""])[0].strip()
+        if path:
+            product, _, page = path.partition("__")
+        else:
+            product = params.get("product", [""])[0].strip()
+            page = params.get("page", [""])[0].strip()
+        if not page:
+            self._send_json(400, {"error": "Missing 'path' or 'page'"})
+            return
+        db = os.path.join(KB_ROOT, "cache", "kb_index.db")
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                if product:
+                    row = con.execute(
+                        "SELECT title, content FROM pages WHERE product=? AND page=? "
+                        "ORDER BY chunk LIMIT 1", (product, page)).fetchone()
+                else:
+                    row = con.execute(
+                        "SELECT title, content FROM pages WHERE page=? "
+                        "ORDER BY chunk LIMIT 1", (page,)).fetchone()
+            finally:
+                con.close()
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+            return
+        if not row:
+            self._send_json(404, {"error": "Page not found"})
+            return
+        self._send_json(200, {
+            "path": path or (product + "__" + page),
+            "product": product,
+            "page": page,
+            "title": row[0],
+            "content": row[1],
+        })
 
     def _handle_health(self):
         """Health check."""

@@ -69,6 +69,16 @@ header p { color: var(--fg2); margin-top: 8px; font-size: 14px; }
 .block-content { font-size: 14px; line-height: 1.6; color: var(--fg); }
 .block-content code { background: var(--bg); padding: 2px 6px; border-radius: 3px;
                       font-size: 13px; }
+.block-more { display: inline-block; margin-top: 10px; font-size: 13px;
+              color: var(--accent); text-decoration: none; cursor: pointer; }
+.block-more:hover { text-decoration: underline; }
+.block-full { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);
+              font-size: 14px; line-height: 1.6; color: var(--fg); }
+.block-full.hidden { display: none; }
+.block-full h4 { font-size: 14px; margin: 14px 0 6px; color: var(--fg); }
+.block-full li { margin: 3px 0 3px 20px; }
+.block-full code { background: var(--bg); padding: 2px 6px; border-radius: 3px;
+                   font-size: 13px; }
 
 /* Related */
 .related { margin-top: 12px; font-size: 13px; color: var(--fg2); }
@@ -210,6 +220,11 @@ function renderResults(data) {
             }
             html += `</div>`;
             html += `<div class="block-content">${renderContent(block.content)}</div>`;
+            if (block.source === 'docs' && block.path &&
+                (block.content || '').length < 1200) {
+                html += `<a href="#" class="block-more" data-path="${escapeHtml(block.path)}">Развернуть полную инструкцию</a>`;
+            }
+            html += `<div class="block-full hidden"></div>`;
             html += `</div>`;
         }
 
@@ -238,10 +253,47 @@ function renderResults(data) {
     }
 
     el.innerHTML = html;
+    bindCardEvents();
 
     // Stats
     const c = data.counts;
     stats.textContent = `docs: ${c.docs} | solutions: ${c.solutions} | crm: ${c.crm} | ${data.latency_ms}ms`;
+}
+
+function bindCardEvents() {
+    const el = document.getElementById('results');
+    el.querySelectorAll('.answer-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+            const more = e.target.closest('.block-more');
+            if (more) { toggleFull(more); return; }
+            if (e.target.closest('a')) return;
+            const first = card.querySelector('.block-more');
+            if (first) toggleFull(first);
+        });
+    });
+}
+
+function toggleFull(link) {
+    const fullDiv = link.closest('.block').querySelector('.block-full');
+    if (fullDiv.classList.contains('hidden') && !fullDiv.dataset.loaded) {
+        link.textContent = 'Загрузка...';
+        fetch(`/api/page?path=${encodeURIComponent(link.dataset.path)}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    fullDiv.innerHTML = `<em>${escapeHtml(data.error)}</em>`;
+                } else {
+                    fullDiv.innerHTML = renderContent(data.content);
+                }
+                fullDiv.dataset.loaded = '1';
+                fullDiv.classList.remove('hidden');
+                link.textContent = 'Свернуть инструкцию';
+            })
+            .catch(() => { link.textContent = 'Ошибка загрузки'; });
+        return;
+    }
+    const hidden = fullDiv.classList.toggle('hidden');
+    link.textContent = hidden ? 'Развернуть полную инструкцию' : 'Свернуть инструкцию';
 }
 
 function intentLabel(intent) {
@@ -266,8 +318,10 @@ function renderContent(text) {
     if (!text) return '<em>нет контента</em>';
     // Simple markdown-ish rendering
     return escapeHtml(text)
+        .replace(/^#{1,3} (.*)$/gm, '<h4>$1</h4>')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/`(.*?)`/g, '<code>$1</code>')
+        .replace(/^- (.*)$/gm, '<li>$1</li>')
         .replace(/\n/g, '<br>');
 }
 

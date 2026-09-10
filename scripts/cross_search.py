@@ -171,11 +171,10 @@ class DocsSource:
                 "url": f"https://docs.tradesoft.ru/{prod}/{page}",
             }
             results.append(entry)
-            # snippet часто пуст (векторные хиты) или это только заголовок
-            if len(snippet or "") < 120:
-                pending.append(entry)
+            pending.append(entry)
 
-        # Подтягиваем полный контент из кэша для коротких/пустых snippet
+        # Подтягиваем полный контент из кэша для всех найденных страниц
+        # (для первичного блока ответа нужна полная инструкция).
         if pending:
             try:
                 con = sqlite3.connect(f"file:{KB_ROOT}/cache/kb_index.db?mode=ro", uri=True)
@@ -188,7 +187,9 @@ class DocsSource:
                         if row and row[0]:
                             full = row[0]
                             entry["content_full"] = full
-                            entry["content"] = _build_excerpt(entry["product"], snippet, full)
+                            if len(entry["content"]) < 120:
+                                entry["content"] = _build_excerpt(entry["product"],
+                                                                  entry["content"], full)
                 finally:
                     con.close()
             except Exception:
@@ -522,7 +523,7 @@ def _asks_for_changes(query):
     return any(h in q for h in _CHANGES_HINTS)
 
 
-def merge_results(docs, solutions, crm, max_per_source=5):
+def merge_results(docs, solutions, crm, max_docs=8, max_solutions=5, max_crm=3):
     """Объединяет результаты из 3 источников в единый список.
 
     Скоры разных источников несопоставимы (docs: гибрид/BM25, бывает
@@ -533,19 +534,19 @@ def merge_results(docs, solutions, crm, max_per_source=5):
     """
     all_results = []
 
-    for i, r in enumerate(docs[:max_per_source]):
+    for i, r in enumerate(docs[:max_docs]):
         r["raw_score"] = r.get("score", 0)
         r["score"] = round(1.0 * (0.92 ** i), 3)
         r["product_canonical"] = _normalize_product("docs", r.get("product"))
         all_results.append(r)
 
-    for i, r in enumerate(solutions[:max_per_source]):
+    for i, r in enumerate(solutions[:max_solutions]):
         r["raw_score"] = r.get("score", 0)
         r["score"] = round(0.9 * (0.9 ** i), 3)
         r["product_canonical"] = _normalize_product("solution", r.get("product"))
         all_results.append(r)
 
-    for i, r in enumerate(crm[:3]):
+    for i, r in enumerate(crm[:max_crm]):
         r["raw_score"] = r.get("score", 0)
         r["score"] = round(0.45 * (0.85 ** i), 3)
         r["product_canonical"] = None
@@ -573,27 +574,67 @@ def compose_answers(results, intent, max_answers=2, cross_links=None):
 
     primary, secondary = Intent.ORDER.get(intent, Intent.ORDER[Intent.GENERAL])
 
+    # Иерархия источников для оформления ответа: инструкции документации
+    # важнее карточек решений/CRM (решения и сделки не "воруют" заголовок).
+    SOURCE_PRIORITY = {"docs": 0, "solution": 1, "crm": 2}
+
+    # Основные продукты сведены раньше вспомогательных при прочих равных
+    # (например, Инструкция Parts.Resource обходит механику Sync при близких скорах).
+    PRODUCT_ORDER = {
+        "parts_intellect": 0, "parts_resource": 1, "sync": 2, "diadok": 3,
+        "seo": 4, "delivery": 5, "wazzup": 6, "tsd": 7, "marketplace": 8,
+        "var": 9, "other": 10,
+    }
+
+    def _best(pool, block_type, exclude=None):
+        """Лучший блок заданного типа из пула (сначала по типу, потом по скору)."""
+        lst = [b for b in pool if block_type is None or b["block_type"] == block_type]
+        if exclude:
+            ex = {id(x) for x in exclude}
+            lst = [b for b in lst if id(b) not in ex]
+        lst.sort(key=lambda r: r.get("score", 0), reverse=True)
+        return lst
+
+    def _group_key(key, items):
+        n_docs = sum(1 for r in items if r.get("source") == "docs")
+        max_score = max(r.get("score", 0) for r in items)
+        # Близкие скоры (до 0.1) сравниваем по приоритету продукта,
+        # чтобы Инструкция Parts.Resource шла раньше механик Sync.
+        bucket = round(max_score, 1)
+        priority = PRODUCT_ORDER.get(key, 99)
+        return (int(n_docs > 0), bucket, -priority, max_score)
+
     answers = []
-    for prod, prod_results in sorted(by_product.items(),
-                                      key=lambda x: -max(r.get("score", 0) for r in x[1])):
-        # Для каждого продукта: лучший how_to и лучший how_it_works (по скору)
-        how_to = [r for r in prod_results if r["block_type"] == "how_to"]
-        how_works = [r for r in prod_results if r["block_type"] == "how_it_works"]
-        how_to.sort(key=lambda r: r.get("score", 0), reverse=True)
-        how_works.sort(key=lambda r: r.get("score", 0), reverse=True)
+    for prod, prod_results in sorted(
+            by_product.items(),
+            key=lambda x: _group_key(x[0], x[1]), reverse=True):
+        pools = {
+            "docs": [r for r in prod_results if r["source"] == "docs"],
+            "solution": [r for r in prod_results if r["source"] == "solution"],
+            "crm": [r for r in prod_results if r["source"] == "crm"],
+        }
 
-        blocks = []
-        # Упорядочиваем по интенту
-        first_list = how_to if primary == "how_to" else how_works
-        second_list = how_works if primary == "how_to" else how_to
+        # Первичный блок (заголовок): лучшая doc-страница группы по скору
+        # (общие инструкции документации — в приоритете над решениями/CRM).
+        # Ответ = ОДИН блок с полной информацией по запросу в рамках продукта.
+        primary_block = None
+        for src in ("docs", "solution", "crm"):
+            lst = _best(pools[src], None)
+            if lst:
+                primary_block = lst[0]
+                break
 
-        if first_list:
-            blocks.append(first_list[0])
-        if second_list:
-            blocks.append(second_list[0])
+        if primary_block is None and prod_results:
+            primary_block = prod_results[0]
 
-        if not blocks and prod_results:
-            blocks.append(prod_results[0])
+        if primary_block is None:
+            continue
+
+        # В блок кладём полный контент страницы (не усечённый snippet).
+        if primary_block.get("content_full"):
+            primary_block["content"] = primary_block.pop("content_full")
+
+        blocks = [primary_block]
 
         if blocks:
             answer = {
@@ -635,6 +676,20 @@ def compose_answers(results, intent, max_answers=2, cross_links=None):
                                 "product": rs["solution_product"],
                                 "score": rs["bm25_score"],
                             })
+                        # И другие релевантные страницы того же продукта
+                        # (собраны поиском, но не вошли в единственный блок).
+                        sec_docs = [r for r in pools.get("docs", [])
+                                    if r.get("path") != b.get("path")]
+                        sec_docs.sort(key=lambda r: r.get("score", 0), reverse=True)
+                        for sd in sec_docs[:3]:
+                            if not any(d.get("path") == sd["path"]
+                                       for d in answer["related_docs"]):
+                                answer["related_docs"].append({
+                                    "path": sd["path"],
+                                    "title": sd.get("title", ""),
+                                    "product": sd.get("product", ""),
+                                    "score": sd.get("score", 0),
+                                })
 
             answers.append(answer)
 
@@ -705,7 +760,9 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             # теряет changelog-страницы (-changes), wazzup, marketplace и т.п.,
             # которые присутствуют в docs-эталоне. Продукт остаётся per-документ
             # (флаг для группировки в compose), а не фильтром.
-            rows = ds.search(query, None, limit=limit_per_source)
+            # Запрашиваем больше docs, чтобы в результат попадали страницы
+            # разных продуктов (Parts.Intellect, Parts.Resource, Sync...)
+            rows = ds.search(query, None, limit=max(limit_per_source, 8))
             if _asks_for_changes(query):
                 return rows
             # Подавляем changelog-шум: страницы *-changes попадают в топ для
