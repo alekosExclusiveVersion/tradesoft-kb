@@ -138,6 +138,22 @@ parse_pages() { # name base
     else
         log "  изменений нет, парсинг пропущен"
     fi
+    apply_patches "$name"
+}
+
+apply_patches() { # name — накладывает файлы из patches/<name>/parsed/ поверх cache/<name>/parsed/
+    local name="$1"
+    local patch_dir="$KB_ROOT/patches/$name/parsed"
+    local parsed_dir="$CACHE_DIR/$name/parsed"
+    if [ -d "$patch_dir" ]; then
+        local count=0
+        while IFS= read -r -d '' pf; do
+            local bn; bn="$(basename "$pf")"
+            cp "$pf" "$parsed_dir/$bn"
+            count=$((count+1))
+        done < <(find "$patch_dir" -name '*.md' -print0)
+        log "  патчей применено: $count"
+    fi
 }
 
 download_images() { # name
