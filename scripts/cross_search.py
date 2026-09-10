@@ -622,6 +622,34 @@ def _page_title(path):
         return path
 
 
+def _docs_fts_related(query, product, exclude=(), limit=8):
+    """Связанные страницы документации продукта по запросу (FTS-only, дёшево).
+
+    Гибридный поиск обрезает топ-8 по всем продуктам сразу, из-за чего родственные
+    материалы продукта (например, все страницы печати чеков Parts.Resource)
+    не попадают в related_docs. Здесь — прямой FTS по продукту без векторов.
+    """
+    if not query or not product:
+        return []
+    try:
+        from search import search as _fts, terms
+        rows, _ = _fts(terms(query), product, limit=limit)
+        out = []
+        for row in rows:
+            prod = row[0] if len(row) > 0 else ""
+            page = row[1] if len(row) > 1 else ""
+            title = row[2] if len(row) > 2 else ""
+            path = f"{prod}__{page}"
+            if path in exclude:
+                continue
+            out.append({"path": path, "title": title,
+                        "product": prod, "score": 0.0})
+        return out
+    except Exception as e:
+        print(f"[docs-fts-related] error: {e}", file=sys.stderr)
+        return []
+
+
 def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
     """Собирает 1-2 структурированных ответа из результатов.
 
@@ -779,6 +807,17 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
                                     "product": child.partition("__")[0],
                                     "score": 0.0,
                                 })
+                        # Родственные материалы продукта по запросу (FTS-only):
+                        # гибридный топ-8 обрезает их (например, всю «печать
+                        # чеков» Parts.Resource), related не должен пустовать.
+                        for rd in _docs_fts_related(query, b.get("product"),
+                                                    exclude={b.get("path")},
+                                                    limit=8):
+                            if len(answer["related_docs"]) >= 12:
+                                break
+                            if not any(d.get("path") == rd["path"]
+                                       for d in answer["related_docs"]):
+                                answer["related_docs"].append(rd)
 
             answers.append(answer)
 
