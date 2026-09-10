@@ -26,6 +26,7 @@ sys.path.insert(0, SCRIPT_DIR)
 from cross_search import cross_search
 from intent import detect_intent, detect_product
 from search import _canonical_query
+import freshness
 from access_log import AccessLogger, gen_session_id
 
 PORT = int(os.environ.get("CROSS_SEARCH_PORT", 8055))
@@ -160,12 +161,28 @@ class APIHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_health(self):
-        """Health check."""
-        self._send_json(200, {
+        """Health check (+ признаки устаревания стемминг-индекса)."""
+        health = {
             "ok": True,
             "service": "cross-search-api",
             "port": PORT,
-        })
+        }
+        try:
+            fp, meta, mtime, reasons = freshness.status()
+            stale = bool(reasons)
+            health["stale"] = stale
+            health["index_mtime"] = mtime
+            health["meta"] = {
+                "fingerprint": (fp or "")[:16] + "…",
+                "built_at": (meta or {}).get("built_at"),
+                "index_mtime": (meta or {}).get("index_mtime"),
+            }
+            if reasons:
+                health["reasons"] = reasons
+        except Exception as e:
+            health["stale"] = None
+            health["reasons"] = [f"ошибка проверки: {e}"]
+        self._send_json(200, health)
 
     def _handle_meta(self):
         """Мета-данные API."""
