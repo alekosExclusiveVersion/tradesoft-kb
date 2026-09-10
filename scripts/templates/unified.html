@@ -109,7 +109,29 @@ header p { color: var(--fg2); margin-top: 8px; font-size: 14px; }
 
 <script>
 const API = '/api/answer';
-let debounceTimer;
+
+function parseHash() {
+    const params = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+    return {
+        q: (params.get('q') || '').trim(),
+        top: parseInt(params.get('top') || '3', 10) || 3,
+        product: params.get('product') || '',
+    };
+}
+
+let top = 3;
+let product = '';
+
+function updateHash(q) {
+    const p = new URLSearchParams();
+    p.set('q', q);
+    p.set('top', String(top));
+    if (product) p.set('product', product);
+    const h = '#' + p.toString();
+    if (location.hash !== h) {
+        history.replaceState(null, '', h);
+    }
+}
 
 document.getElementById('query').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') search();
@@ -119,10 +141,11 @@ function search() {
     const q = document.getElementById('query').value.trim();
     if (!q) return;
 
+    updateHash(q);
     document.getElementById('results').innerHTML = '<div class="loading">Поиск</div>';
     document.getElementById('stats').textContent = '';
 
-    fetch(`${API}?q=${encodeURIComponent(q)}&max=3`)
+    fetch(`${API}?q=${encodeURIComponent(q)}&max=${top}`)
         .then(r => r.json())
         .then(data => renderResults(data))
         .catch(err => {
@@ -130,6 +153,24 @@ function search() {
                 `<div class="empty"><h2>Ошибка</h2><p>${err.message}</p></div>`;
         });
 }
+
+window.addEventListener('hashchange', () => {
+    const h = parseHash();
+    top = h.top;
+    product = h.product;
+    document.getElementById('query').value = h.q;
+    if (h.q) search();
+});
+
+(function init() {
+    const h = parseHash();
+    top = h.top;
+    product = h.product;
+    if (h.q) {
+        document.getElementById('query').value = h.q;
+        search();
+    }
+})();
 
 function renderResults(data) {
     const el = document.getElementById('results');

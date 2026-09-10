@@ -69,6 +69,47 @@ def _get_cross_links_source():
     return _cross_links_source
 
 
+def _build_excerpt(product, snippet, full_text, max_len=400):
+    """Осмысленный эксцерпт для отображения.
+
+    Если snippet — цельный текст, оставляем его. Иначе строим из полного
+    контента: для changelog-страниц берём несколько первых пунктов списка,
+    для остальных — тело страницы (без заголовков и картинок).
+    """
+    if not full_text:
+        return (snippet or "")[:max_len]
+    if len(full_text) <= max_len + 60:
+        return full_text.strip()
+
+    lines = []
+    for ln in full_text.splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith("![") or (ln.startswith("<") and ln.endswith(">")):
+            continue
+        lines.append(ln)
+
+    body = [ln for ln in lines if not ln.startswith("#")]
+    if not body:
+        return (snippet or "")[:max_len]
+
+    def is_body(snip):
+        return len(snip) >= 120 and any(not l.startswith("#") for l in snip.splitlines())
+
+    if product and product.endswith("-changes") and any(
+            l.startswith(("- ", "* ")) for l in body):
+        start = next(i for i, l in enumerate(body) if l.startswith(("- ", "* ")))
+        out = "\n".join(body[start:]).strip()
+    elif is_body(snippet or ""):
+        return (snippet or "")[:max_len]
+    else:
+        out = "\n".join(body).strip()
+
+    if len(out) > max_len:
+        cut = out.rfind(" ", 0, max_len)
+        out = out[:cut if cut > 170 else max_len] + "…"
+    return out
+
+
 class DocsSource:
     """tradesoft-kb: документация products (FTS5 + vectors)."""
 
@@ -109,6 +150,7 @@ class DocsSource:
                 pass
 
         results = []
+        pending = []
         for row in result_holder[0]:
             # row = [product, page_file, title, path, snippet, score]
             prod = row[0] if len(row) > 0 else ""
@@ -117,15 +159,40 @@ class DocsSource:
             path = row[3] if len(row) > 3 else ""
             snippet = row[4] if len(row) > 4 else ""
             score = row[5] if len(row) > 5 else 0
-            results.append({
+            entry = {
                 "source": "docs",
                 "path": f"{prod}__{page}",
                 "product": prod,
+                "page": page,
                 "title": title,
-                "content": snippet,
+                "content": snippet or "",
+                "content_full": "",
                 "score": score,
                 "url": f"https://docs.tradesoft.ru/{prod}/{page}",
-            })
+            }
+            results.append(entry)
+            # snippet часто пуст (векторные хиты) или это только заголовок
+            if len(snippet or "") < 120:
+                pending.append(entry)
+
+        # Подтягиваем полный контент из кэша для коротких/пустых snippet
+        if pending:
+            try:
+                con = sqlite3.connect(f"file:{KB_ROOT}/cache/kb_index.db?mode=ro", uri=True)
+                try:
+                    for entry in pending:
+                        row = con.execute(
+                            "SELECT content FROM pages WHERE product=? AND page=?",
+                            (entry["product"], entry["page"]),
+                        ).fetchone()
+                        if row and row[0]:
+                            full = row[0]
+                            entry["content_full"] = full
+                            entry["content"] = _build_excerpt(entry["product"], snippet, full)
+                finally:
+                    con.close()
+            except Exception:
+                pass
         return results
 
 
@@ -222,6 +289,9 @@ class SolutionsSource:
 
         results = []
         for r in rows:
+            # Не совпал ни один токен — мусор, не отдаём
+            if not (r["match_score"] or 0):
+                continue
             # Берём первые 500 символов из resolution как snippet
             resolution = (r["resolution"] or "")[:500]
             # Нормированный скор совпадения (0..1): match_score / (3 × токенов).
@@ -490,9 +560,10 @@ def compose_answers(results, intent, max_answers=2, cross_links=None):
     Каждый ответ содержит блоки how_to и how_it_works, упорядоченные по интенту.
     Если доступны cross-links, добавляет related_docs и related_solutions.
     """
-    # Классифицируем блоки
+    # Классифицируем блоки (по полному контенту, если он подтянут)
     for r in results:
-        r["block_type"] = classify_block(r.get("source", ""), r.get("content", ""))
+        r["block_type"] = classify_block(r.get("source", ""),
+                                         r.get("content_full") or r.get("content", ""))
 
     # Группируем по product_canonical
     by_product = {}
@@ -505,9 +576,11 @@ def compose_answers(results, intent, max_answers=2, cross_links=None):
     answers = []
     for prod, prod_results in sorted(by_product.items(),
                                       key=lambda x: -max(r.get("score", 0) for r in x[1])):
-        # Для каждого продукта: берём лучший how_to и лучший how_it_works
+        # Для каждого продукта: лучший how_to и лучший how_it_works (по скору)
         how_to = [r for r in prod_results if r["block_type"] == "how_to"]
         how_works = [r for r in prod_results if r["block_type"] == "how_it_works"]
+        how_to.sort(key=lambda r: r.get("score", 0), reverse=True)
+        how_works.sort(key=lambda r: r.get("score", 0), reverse=True)
 
         blocks = []
         # Упорядочиваем по интенту
@@ -646,7 +719,12 @@ def _cross_search_impl(query, max_answers, limit_per_source):
     def _search_solutions():
         try:
             sol = _get_solutions_source()
-            return sol.search(query, sol_product, limit=limit_per_source)
+            rows = sol.search(query, sol_product, limit=limit_per_source)
+            if _asks_for_changes(query):
+                # Для запросов про версии ответы должны браться из docs-changelog;
+                # решения показываем только при полном совпадении токенов запроса.
+                rows = [r for r in rows if (r.get("score") or 0) >= 1.0]
+            return rows
         except Exception as e:
             print(f"[solutions] error: {e}", file=sys.stderr)
             return []
