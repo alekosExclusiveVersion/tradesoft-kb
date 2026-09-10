@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unified Search — Tradesoft</title>
+<style>
+:root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+    --fg: #c9d1d9; --fg2: #8b949e; --fg3: #484f58;
+    --accent: #58a6ff; --accent2: #1f6feb;
+    --green: #3fb950; --yellow: #d29922; --red: #f85149;
+    --border: #30363d; --radius: 6px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+       background: var(--bg); color: var(--fg); min-height: 100vh; }
+.container { max-width: 900px; margin: 0 auto; padding: 20px; }
+
+/* Header */
+header { text-align: center; padding: 40px 0 20px; }
+header h1 { font-size: 24px; color: var(--fg); font-weight: 600; }
+header p { color: var(--fg2); margin-top: 8px; font-size: 14px; }
+
+/* Search box */
+.search-box { display: flex; gap: 8px; margin: 20px 0; }
+.search-box input {
+    flex: 1; padding: 12px 16px; font-size: 16px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--fg); outline: none;
+}
+.search-box input:focus { border-color: var(--accent); }
+.search-box button {
+    padding: 12px 24px; font-size: 16px; font-weight: 600;
+    background: var(--accent2); color: #fff; border: none;
+    border-radius: var(--radius); cursor: pointer;
+}
+.search-box button:hover { background: var(--accent); }
+
+/* Intent badge */
+.intent-badge {
+    display: inline-block; padding: 4px 10px; font-size: 12px;
+    border-radius: 12px; font-weight: 600; margin-bottom: 12px;
+}
+.intent-configure { background: #1f6feb33; color: var(--accent); }
+.intent-explain { background: #3fb95033; color: var(--green); }
+.intent-troubleshoot { background: #f8514933; color: var(--red); }
+.intent-define { background: #d2992233; color: var(--yellow); }
+.intent-navigate { background: #8b949e33; color: var(--fg2); }
+.intent-general { background: #30363d; color: var(--fg2); }
+
+/* Answer card */
+.answer-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin: 16px 0;
+}
+.answer-card h3 { font-size: 18px; margin-bottom: 12px; }
+.answer-card .product { color: var(--accent); font-size: 13px; margin-bottom: 8px; }
+
+/* Block */
+.block { margin: 12px 0; padding: 16px; background: var(--bg3);
+         border-radius: var(--radius); border-left: 3px solid var(--border); }
+.block.how_to { border-left-color: var(--accent); }
+.block.how_it_works { border-left-color: var(--green); }
+.block-type { font-size: 11px; font-weight: 600; text-transform: uppercase;
+              color: var(--fg2); margin-bottom: 8px; }
+.block-source { font-size: 11px; color: var(--fg3); margin-bottom: 8px; }
+.block-content { font-size: 14px; line-height: 1.6; color: var(--fg); }
+.block-content code { background: var(--bg); padding: 2px 6px; border-radius: 3px;
+                      font-size: 13px; }
+
+/* Related */
+.related { margin-top: 12px; font-size: 13px; color: var(--fg2); }
+.related a { color: var(--accent); text-decoration: none; }
+.related a:hover { text-decoration: underline; }
+
+/* Stats */
+.stats { text-align: center; color: var(--fg3); font-size: 12px; margin-top: 20px; }
+
+/* Loading */
+.loading { text-align: center; padding: 40px; color: var(--fg2); }
+.loading::after { content: ''; display: inline-block; width: 20px; height: 20px;
+                  border: 2px solid var(--border); border-top-color: var(--accent);
+                  border-radius: 50%; animation: spin 0.8s linear infinite;
+                  margin-left: 8px; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Empty state */
+.empty { text-align: center; padding: 60px 20px; color: var(--fg2); }
+.empty h2 { font-size: 18px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>Unified Search</h1>
+        <p>Документация + Решения + CRM — единый поиск</p>
+    </header>
+
+    <div class="search-box">
+        <input type="text" id="query" placeholder="Задайте вопрос..."
+               autofocus autocomplete="off">
+        <button onclick="search()">Найти</button>
+    </div>
+
+    <div id="results"></div>
+    <div id="stats" class="stats"></div>
+</div>
+
+<script>
+const API = '/api/answer';
+let debounceTimer;
+
+document.getElementById('query').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') search();
+});
+
+function search() {
+    const q = document.getElementById('query').value.trim();
+    if (!q) return;
+
+    document.getElementById('results').innerHTML = '<div class="loading">Поиск</div>';
+    document.getElementById('stats').textContent = '';
+
+    fetch(`${API}?q=${encodeURIComponent(q)}&max=3`)
+        .then(r => r.json())
+        .then(data => renderResults(data))
+        .catch(err => {
+            document.getElementById('results').innerHTML =
+                `<div class="empty"><h2>Ошибка</h2><p>${err.message}</p></div>`;
+        });
+}
+
+function renderResults(data) {
+    const el = document.getElementById('results');
+    const stats = document.getElementById('stats');
+
+    if (!data.answers || data.answers.length === 0) {
+        el.innerHTML = '<div class="empty"><h2>Ничего не найдено</h2></div>';
+        return;
+    }
+
+    let html = '';
+
+    // Intent badge
+    html += `<div class="intent-badge intent-${data.intent}">${intentLabel(data.intent)}</div>`;
+
+    // Answers
+    for (const answer of data.answers) {
+        html += `<div class="answer-card">`;
+        html += `<h3>${escapeHtml(answer.title)}</h3>`;
+        if (answer.product) {
+            html += `<div class="product">${escapeHtml(answer.product)}</div>`;
+        }
+
+        // Blocks
+        for (const block of answer.blocks) {
+            html += `<div class="block ${block.block_type}">`;
+            html += `<div class="block-type">${blockLabel(block.block_type)}</div>`;
+            html += `<div class="block-source">${sourceLabel(block.source)}`;
+            if (block.url) {
+                html += ` — <a href="${block.url}" target="_blank">источник</a>`;
+            }
+            html += `</div>`;
+            html += `<div class="block-content">${renderContent(block.content)}</div>`;
+            html += `</div>`;
+        }
+
+        // Related
+        const related = [];
+        if (answer.related_docs && answer.related_docs.length > 0) {
+            related.push('Документация: ' + answer.related_docs.map(d =>
+                `<a href="${docUrl(d.path)}" target="_blank">${escapeHtml(d.title || d.path)}</a>`
+            ).join(', '));
+        }
+        if (answer.related_solutions && answer.related_solutions.length > 0) {
+            related.push('Решения: ' + answer.related_solutions.map(s =>
+                `<a href="https://ts-b24-knowledge.search/api/solution?id=${s.id}" target="_blank">${escapeHtml(s.title)}</a>`
+            ).join(', '));
+        }
+        if (answer.related_deals && answer.related_deals.length > 0) {
+            related.push('Сделки: ' + answer.related_deals.map(id =>
+                `<a href="https://b24.tradesoft.ru/crm/deal/details/${id}/" target="_blank">#${id}</a>`
+            ).join(', '));
+        }
+        if (related.length > 0) {
+            html += `<div class="related">${related.join('<br>')}</div>`;
+        }
+
+        html += `</div>`;
+    }
+
+    el.innerHTML = html;
+
+    // Stats
+    const c = data.counts;
+    stats.textContent = `docs: ${c.docs} | solutions: ${c.solutions} | crm: ${c.crm} | ${data.latency_ms}ms`;
+}
+
+function intentLabel(intent) {
+    const labels = {
+        configure: 'Настройка', explain: 'Объяснение',
+        troubleshoot: 'Устранение', define: 'Определение',
+        navigate: 'Навигация', general: 'Общий',
+    };
+    return labels[intent] || intent;
+}
+
+function blockLabel(type) {
+    return type === 'how_to' ? 'Как настроить' : 'Как работает';
+}
+
+function sourceLabel(source) {
+    const labels = { docs: 'Документация', solution: 'Решение', crm: 'CRM' };
+    return labels[source] || source;
+}
+
+function renderContent(text) {
+    if (!text) return '<em>нет контента</em>';
+    // Simple markdown-ish rendering
+    return escapeHtml(text)
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`(.*?)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
+}
+
+function docUrl(path) {
+    const parts = path.split('__');
+    if (parts.length === 2) {
+        return `https://docs.tradesoft.ru/${parts[0]}/${parts[1]}`;
+    }
+    return '#';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+</body>
+</html>

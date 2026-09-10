@@ -43,6 +43,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self._handle_health()
         elif path == "/api/meta":
             self._handle_meta()
+        elif path == "/" or path == "/index.html":
+            self._serve_static("unified.html", "text/html")
         else:
             self._send_json(404, {"error": "Not found"})
 
@@ -99,6 +101,21 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_static(self, filename, content_type):
+        """Отдать статический файл."""
+        templates_dir = os.path.join(SCRIPT_DIR, "templates")
+        filepath = os.path.join(templates_dir, filename)
+        if not os.path.exists(filepath):
+            self._send_json(404, {"error": "File not found"})
+            return
+        with open(filepath, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
