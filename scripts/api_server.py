@@ -86,6 +86,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "query": q,
             "intent": result["intent"],
             "product": result["product"],
+            "product_display": result.get("product_display"),
             "answers": result["answers"],
             "counts": result["counts"],
             "latency_ms": latency_ms,

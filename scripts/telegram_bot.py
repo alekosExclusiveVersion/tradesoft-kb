@@ -132,7 +132,7 @@ def _flatten_results(res):
 def format_results(items, res, query):
     esc = _esc
     lines = [f"Запрос: <b>{esc(query)}</b>"]
-    product = res.get("product")
+    product = res.get("product_display") or res.get("product")
     if product:
         lines.append(f"Продукт: <i>{esc(product)}</i>")
     counts = res.get("counts") or {}

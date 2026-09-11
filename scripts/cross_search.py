@@ -523,6 +523,23 @@ _SOLUTION_PRODUCT_MAP = {
     "Другое": "other",
 }
 
+# Читаемые названия продуктов для отображения (кнопка продукта в веб-UI,
+# «Продукт:» в telegram_bot). В ответе сохраняем оба поля: product (label),
+# product_id (canonical) — исторический canonical уехал в топ-уровень/логи.
+PRODUCT_DISPLAY_NAME = {
+    "parts_intellect": "Parts.Intellect",
+    "parts_resource": "Parts.Resource",
+    "sync": "Синхронизатор",
+    "diadok": "Диадок",
+    "seo": "SEO-руководство",
+    "delivery": "График поставок",
+    "wazzup": "Wazzup",
+    "tsd": "ТСД",
+    "marketplace": "Маркетплейсы",
+    "var": "ВАР",
+    "other": "Другое",
+}
+
 
 def _normalize_product(source_name, product_name):
     """Нормализует название продукта к canonical ID."""
@@ -785,7 +802,8 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
         if blocks:
             answer = {
                 "title": blocks[0].get("title", ""),
-                "product": prod if prod != "general" else None,
+                "product": PRODUCT_DISPLAY_NAME.get(prod, prod) if prod != "general" else None,
+                "product_id": prod if prod != "general" else None,
                 "blocks": blocks,
                 "images": [],
                 "related_deals": [],
@@ -1036,6 +1054,7 @@ def _cross_search_impl(query, max_answers, limit_per_source):
         "answers": answers,
         "intent": intent,
         "product": product,
+        "product_display": PRODUCT_DISPLAY_NAME.get(product, product),
         "latency_ms": latency_ms,
         "counts": {
             "docs": len(doc_results),
