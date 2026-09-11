@@ -238,6 +238,38 @@ class DocsSource:
                 print(f"[docs] подтягивание контента: {e}", file=sys.stderr)
         return results
 
+    def get_by_path(self, path):
+        """Возвращает entry страницы документации по 'product__page'
+        с полным контентом, либо None, если страница не найдена."""
+        product, _, page = path.partition("__")
+        if not product or not page:
+            return None
+        try:
+            con = sqlite3.connect(f"file:{KB_ROOT}/cache/kb_index.db?mode=ro", uri=True)
+            try:
+                chunks = con.execute(
+                    "SELECT content FROM pages WHERE product=? AND page=? ORDER BY chunk",
+                    (product, page)).fetchall()
+            finally:
+                con.close()
+        except Exception as e:
+            print(f"[docs] get_by_path: {e}", file=sys.stderr)
+            return None
+        if not chunks:
+            return None
+        full = "\n".join(r[0] or "" for r in chunks)
+        return {
+            "source": "docs",
+            "path": path,
+            "product": product,
+            "page": page,
+            "title": _page_title(path),
+            "content": _build_excerpt(product, _page_title(path), full),
+            "content_full": full,
+            "score": 0.0,
+            "url": _build_doc_url(product, page),
+        }
+
 
 class SolutionsSource:
     """ts-b24-knowledge: решения поддержки (FTS5)."""
@@ -594,17 +626,28 @@ DOCS_MERGE_TOP = 24
 # ответе появлялись карточки остальных продуктов (см. _search_docs).
 _FEATURE_CROSS_PRODUCTS = {"delivery"}
 
-# Темы, которые не завязаны на конкретный продукт и живут в нескольких системах
+# Темы, не привязанные к одному продукту. Живут в нескольких системах
 # (например, «печать чеков» — и POS Parts.Intellect, и онлайн-касса Parts.Resource).
-# Для них пул дополняется поиском по самой теме в другом продукте: широкий поиск
-# по шумному запросу («... зфкеы resource b принимать оплаты на сайте?») топ-страниц
-# печати чеков не выдаёт — ведёт на «Создание нового заказа клиента».
+# Для них пул дополняется поиском по самой теме в «другом» продукте (см. _search_docs).
 _CROSS_PRODUCT_TOPICS = ("печать чек", "печати чек", "печатать чек")
 _CROSS_TOPIC_OTHER = {
     "печать чеков": {
         "parts_resource": "parts-intellect-guide",
         "parts_intellect": "parts-resource-guide",
     },
+}
+
+# Приоритетные страницы Parts.Resource, раскрывающие подвопрос «принимать
+# оплаты на сайте», когда основной блок ответа — «Настройка онлайн-кассы»
+# (покрывает чеки + кассу, но не все шаги по оплате). Порядок = приоритет.
+# Списки обновляются через fetch-скрипт (scripts/fetch.sh), а при изменении
+# нужно обновить и manifests.
+_PAYMENT_FOLLOWUP_PAGES = {
+    "parts_resource": [
+        "priem_onlajn_platezhej.htm.md",
+        "nastrojka_sposobov_oplaty.htm.md",
+        "pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md",
+    ],
 }
 
 
@@ -615,6 +658,12 @@ def _cross_topic_other(query):
     if any(t in q for t in _CROSS_PRODUCT_TOPICS):
         return _CROSS_TOPIC_OTHER["печать чеков"]
     return {}
+
+
+def _has_payment_subquestion(query):
+    """Запрос содержит подвопрос про приём/настройку оплат на сайте."""
+    q = query.lower()
+    return ("оплат" in q or "платеж" in q) and ("сайт" in q or "онлайн" in q or "интернет" in q)
 
 # API-справочники (parts-index-rest-api, parts-resource-rest-api) — в них
 # справочный контент (методы, параметры, коды ответов), который
@@ -847,6 +896,30 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
 
         blocks = [primary_block]
 
+        # Полноценный последовательный ответ: если запрос содержит несколько
+        # подвопросов (печать чеков + приём оплат на сайте), добавляем подблоки
+        # с раскрытием остальных частей, чтобы ответ был исчерпывающим, а не
+        # ссылкой на related. Блоки — приоритетные страницы из пула документации
+        # (см. _PAYMENT_FOLLOWUP_PAGES), не более 2.
+        if (primary_block.get("source") == "docs"
+                and _has_payment_subquestion(query)
+                and prod in _PAYMENT_FOLLOWUP_PAGES):
+            added_paths = {primary_block.get("path")}
+            for page in _PAYMENT_FOLLOWUP_PAGES[prod]:
+                if len(blocks) >= 3:
+                    break
+                match = next((r for r in pools.get("docs", [])
+                              if r.get("page") == page
+                              and r.get("product") == primary_block.get("product")
+                              and r.get("path") != primary_block.get("path")), None)
+                if not match or match.get("path") in added_paths:
+                    continue
+                m = dict(match)
+                if m.get("content_full"):
+                    m["content"] = m.pop("content_full")
+                blocks.append(m)
+                added_paths.add(match.get("path"))
+
         if blocks:
             answer = {
                 "title": blocks[0].get("title", ""),
@@ -889,11 +962,14 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
                                 "score": rs["bm25_score"],
                             })
                         # И другие релевантные страницы того же продукта
-                        # (собраны поиском, но не вошли в единственный блок,
-                        # включая фрагменты-дополнения вроде «Правил… по СНО»).
+                        # (собраны поиском, но не вошли в блок, включая
+                        # фрагменты-дополнения вроде «Правил… по СНО»).
+                        # Страницы, ставшие подблоками (cross_expand), в related
+                        # не дублируем — они уже раскрыты в карточке.
                         sec_docs = [r for r in pools.get("docs", [])
                                     if r.get("path") != b.get("path")
-                                    and "," not in (r.get("product") or "")]
+                                    and "," not in (r.get("product") or "")
+                                    and not r.get("cross_expand")]
                         sec_docs.sort(key=lambda r: r.get("score", 0), reverse=True)
                         for sd in sec_docs[:5]:
                             if not any(d.get("path") == sd["path"]
@@ -1075,6 +1151,9 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             # Темы, пересекающие продукты, широким поиском по шумному запросу не
             # находятся (для «печати чеков» выдаёт «Создание нового заказа
             # клиента»), поэтому ищем по самой теме в «другом» продукте.
+            # Темы, пересекающие продукты, широким поиском по шумному запросу не
+            # находятся (для «печати чеков» выдаёт «Создание нового заказа
+            # клиента»), поэтому ищем по самой теме в «другом» продукте.
             other = _cross_topic_other(query)
             if other:
                 other_pid = other.get(dominant)
@@ -1088,6 +1167,24 @@ def _cross_search_impl(query, max_answers, limit_per_source):
                     # max_docs (они всегда идут в хвосте пула), а compose не даёт
                     # решению «обогнать» карточку документации по теме.
                     _append_unseen(add, flag="chek")
+
+            # Запрос с несколькими подвопросами (« печать чеков + оплаты на
+            # сайте»). Ведущая страница (Настройка онлайн-кассы) покрывает оба,
+            # но вторая часть (приём/настройка оплат) раскрывается досконально
+            # только в виде последовательных подблоков. Их подтягиваем из
+            # приоритетного списка, чтобы ответ был полноценным.
+            if _has_payment_subquestion(query):
+                # Определяем pid доминирующего продукта по реальным строкам пула
+                pid = next((r.get("product") for r in rows
+                            if _normalize_product("docs", r.get("product")) == dominant), None)
+                if pid:
+                    for p in _PAYMENT_FOLLOWUP_PAGES.get(dominant, ()):
+                        if any(r.get("page") == p for r in rows):
+                            continue
+                        r = ds.get_by_path(f"{pid}__{p}")
+                        if r and r.get("content"):
+                            r["cross_expand"] = "payment"
+                            rows.append(r)
             return rows
         except Exception as e:
             print(f"[docs] error: {e}", file=sys.stderr)
