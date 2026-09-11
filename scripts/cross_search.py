@@ -533,7 +533,7 @@ PRODUCT_DISPLAY_NAME = {
     "sync": "Синхронизатор",
     "diadok": "Диадок",
     "seo": "SEO-руководство",
-    "delivery": "График поставок",
+    "delivery": "Parts.Intellect",
     "wazzup": "Wazzup",
     "tsd": "ТСД",
     "marketplace": "Маркетплейсы",
