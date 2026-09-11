@@ -651,6 +651,10 @@ def merge_results(docs, solutions, crm, max_docs=DOCS_MERGE_TOP, max_solutions=5
 # Ключ: (docs_product, тема из запроса).
 MAIN_DOC_PAGES = {
     ("parts-intellect-guide", "печать чеков"): "protsess_pechati_chekov_v_programme.htm.md",
+    # Часы Parts.Resource: «настроить печать чеков … принимать оплаты на сайте»
+    # ведёт на Настройку онлайн-кассы (и настройка чеков, и приём онлайн-оплат),
+    # а не на «Примеры печати чеков», которые находятся выше по FTS-скору.
+    ("parts-resource-guide", "печать чеков"): "nastrojka_onlajn_kassy.htm.md",
 }
 
 # Страницы-«оглавления»: короткий тизер («Рассмотрим … подробнее»), а содержание

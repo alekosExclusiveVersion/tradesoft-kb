@@ -1009,6 +1009,15 @@
    "expected": [
     "diadok__ehksport_dokumentov_v_diadok.htm.md"
    ]
+  },
+  {
+   "q": "как настроить печать чеков в parts resource и принимать оплаты на сайте?",
+   "expected": [
+    "parts-resource-guide__nastrojka_onlajn_kassy.htm.md",
+    "parts-resource-guide__primery_pechati_chekov.htm.md",
+    "parts-resource-guide__pechat_chekov_vozvrata_avansa.htm.md",
+    "parts-resource-guide__provedenie_oplat_za_zakazy.htm.md"
+   ]
   }
  ]
 }
