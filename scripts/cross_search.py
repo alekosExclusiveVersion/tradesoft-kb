@@ -594,6 +594,28 @@ DOCS_MERGE_TOP = 24
 # ответе появлялись карточки остальных продуктов (см. _search_docs).
 _FEATURE_CROSS_PRODUCTS = {"delivery"}
 
+# Темы, которые не завязаны на конкретный продукт и живут в нескольких системах
+# (например, «печать чеков» — и POS Parts.Intellect, и онлайн-касса Parts.Resource).
+# Для них пул дополняется поиском по самой теме в другом продукте: широкий поиск
+# по шумному запросу («... зфкеы resource b принимать оплаты на сайте?») топ-страниц
+# печати чеков не выдаёт — ведёт на «Создание нового заказа клиента».
+_CROSS_PRODUCT_TOPICS = ("печать чек", "печати чек", "печатать чек")
+_CROSS_TOPIC_OTHER = {
+    "печать чеков": {
+        "parts_resource": "parts-intellect-guide",
+        "parts_intellect": "parts-resource-guide",
+    },
+}
+
+
+def _cross_topic_other(query):
+    """Продукт для тематического дополнения в зависимости от темы и продукта
+    доминирующего пула (parts_resource <-> parts_intellect)."""
+    q = query.lower()
+    if any(t in q for t in _CROSS_PRODUCT_TOPICS):
+        return _CROSS_TOPIC_OTHER["печать чеков"]
+    return {}
+
 # API-справочники (parts-index-rest-api, parts-resource-rest-api) — в них
 # справочный контент (методы, параметры, коды ответов), который
 # для обычных (не-API) запросов не релевантен, но выбивается в топ из-за
@@ -621,7 +643,14 @@ def merge_results(docs, solutions, crm, max_docs=DOCS_MERGE_TOP, max_solutions=5
     all_results = []
     api_intent = _api_intent(query)
 
-    for i, r in enumerate(docs[:max_docs]):
+    # Тематически расширенные строки (cross_expand), например страницы «печати
+    # чеков» другого продукта, всегда в хвосте пула и за max_docs обрезаться
+    # не должны — иначе карточка этого продукта не соберётся вовсе.
+    docs_listed = list(docs)
+    docs_core = [r for r in docs_listed if not r.get("cross_expand")][:max_docs]
+    docs_merged = docs_core + [r for r in docs_listed if r.get("cross_expand")]
+
+    for i, r in enumerate(docs_merged):
         r["raw_score"] = r.get("score", 0)
         rank = i
         if not api_intent and (r.get("product") or "").endswith("-rest-api"):
@@ -760,7 +789,15 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
 
     def _group_key(key, items):
         n_docs = sum(1 for r in items if r.get("source") == "docs")
-        max_score = max(r.get("score", 0) for r in items)
+        # Позиция группы среди ответов определяется лучшей карточкой. Когда в
+        # группе есть документация, решения/CRM её не «обгоняют» (иначе тема
+        # «печать чеков» при добавлении карточки Parts.Intellect из-за решения
+        # «настроить кассу» вытеснила бы Parts.Resource из top-1).
+        if n_docs:
+            max_score = max(r.get("score", 0) for r in items
+                            if r.get("source") == "docs")
+        else:
+            max_score = max(r.get("score", 0) for r in items)
         # Близкие скоры (до 0.1) сравниваем по приоритету продукта,
         # чтобы Инструкция Parts.Resource шла раньше механик Sync.
         bucket = round(max_score, 1)
@@ -999,11 +1036,33 @@ def _cross_search_impl(query, max_answers, limit_per_source):
                     if not ("-changes" in (r.get("product") or ""))]
 
             # Тематическая экспансия: детектированный feature-продукт не сужает
-            # тему — страницы «график поставок» есть и в Parts.Resource, и в
-            # Parts.Intellect. Дополняем пул широким (без авто-детекта) поиском,
-            # отбрасывая страницы самого feature-продукта; compose соберёт из них
-            # отдельные карточки ответа ниже lead-карточки.
-            if product in _FEATURE_CROSS_PRODUCTS:
+            # тему — страницы «график поставок»/«печать чеков» есть и в
+            # Parts.Resource, и в Parts.Intellect. Дополняем пул так, чтобы у
+            # остальных продуктов появились свои карточки ниже lead-карточки.
+            dominant = None
+            if rows:
+                counts = {}
+                for r in rows:
+                    c = _normalize_product("docs", r.get("product"))
+                    counts[c] = counts.get(c, 0) + 1
+                dominant = max(counts, key=counts.get)
+
+            def _append_unseen(add, flag=None):
+                seen = {(r.get("product"), r.get("page")) for r in rows}
+                for r in add:
+                    if "-changes" in (r.get("product") or ""):
+                        continue
+                    if (r.get("product"), r.get("page")) in seen:
+                        continue
+                    if dominant is not None \
+                            and _normalize_product("docs", r.get("product")) == dominant:
+                        continue
+                    if flag:
+                        r["cross_expand"] = flag
+                    rows.append(r)
+
+            # Feature-продукт: широкий поиск по запросу (без авто-детекта).
+            if (product or None) in _FEATURE_CROSS_PRODUCTS:
                 try:
                     wide = ds.search(query, None,
                                      limit=max(limit_per_source, DOCS_MERGE_TOP),
@@ -1011,15 +1070,24 @@ def _cross_search_impl(query, max_answers, limit_per_source):
                 except Exception as e:
                     print(f"[docs] расширение пула: {e}", file=sys.stderr)
                     wide = []
-                seen = {(r.get("product"), r.get("page")) for r in rows}
-                for r in wide:
-                    if "-changes" in (r.get("product") or ""):
-                        continue
-                    if (r.get("product"), r.get("page")) in seen:
-                        continue
-                    if _normalize_product("docs", r.get("product")) == product:
-                        continue
-                    rows.append(r)
+                _append_unseen(wide)
+
+            # Темы, пересекающие продукты, широким поиском по шумному запросу не
+            # находятся (для «печати чеков» выдаёт «Создание нового заказа
+            # клиента»), поэтому ищем по самой теме в «другом» продукте.
+            other = _cross_topic_other(query)
+            if other:
+                other_pid = other.get(dominant)
+                if other_pid:
+                    try:
+                        add = ds.search("печать чеков", other_pid, limit=4)
+                    except Exception as e:
+                        print(f"[docs] тема другого продукта: {e}", file=sys.stderr)
+                        add = []
+                    # Флаг cross_expand: merge_results не обрезает эти строки по
+                    # max_docs (они всегда идут в хвосте пула), а compose не даёт
+                    # решению «обогнать» карточку документации по теме.
+                    _append_unseen(add, flag="chek")
             return rows
         except Exception as e:
             print(f"[docs] error: {e}", file=sys.stderr)
