@@ -1226,6 +1226,13 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
     # когда имя продукта совпало со словом запроса («выгрузка товаров на
     # маркетплейс» -> marketplace держит ответ в parts-resource-guide,
     # «версия 6.74» -> parts-resource-guide скрывает parts-resource-changes).
+    #
+    # Широкий пул НЕ должен вытеснять узкий, если тот уже осмысленно покрывает
+    # запрос: «печать чеков … resource … оплаты на сайте» в parts-resource-guide
+    # даёт 24 релевантных страницы, а wide-вариация по шумному запросу («зфкеы»)
+    # возвращает 3 обрывочных страницы Parts.Intellect, «выигрывая» покрытием
+    # 1.0 против 0.88 только за счёт случайного распределения терминов.
+    # Требуем: заметный выигрыш по покрытию И широкий пул не единичный.
     if (detected_product is not None and detected_product == product
             and not web_payment and rows):
         det_cov = _result_term_coverage(query, rows)
@@ -1233,7 +1240,16 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
             wide_rows, _, wide_meta = _hybrid_inner(
                 query, None, limit, snippets, embed_host)
             wide_cov = _result_term_coverage(query, wide_rows) if wide_rows else 0.0
-            if wide_cov > det_cov:
+            if (wide_rows and len(wide_rows) >= 4
+                    and wide_cov >= det_cov + 0.05):
+                rows = wide_rows
+                meta = wide_meta
+            elif (wide_rows and len(wide_rows) < 4
+                    and wide_cov >= det_cov + 0.20):
+                # Единичный широкий пул берём только при ярком выигрыше:
+                # иначе 2-3 обрывочных страницы Parts.Intellect вытесняют
+                # хорошо покрывающий узкий пул (отчёт о «печать чеков…
+                # resource»).
                 rows = wide_rows
                 meta = wide_meta
 
