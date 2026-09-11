@@ -64,10 +64,16 @@ PRODUCT_MARKERS = {
 #     не найдено, чтобы «настроить график поставок» оставался delivery_schedule,
 #     а «…график поставок в Parts.Resource» уходил в parts-resource-guide.
 PRODUCT_NAMES_SYSTEM = [
-    (("изменения parts resource", "parts resource changes", "resource changes",
+    (("изменения parts resource", "изменения в parts resource",
+      "изменение в parts resource", "изменение parts resource",
+      "что изменилось в parts resource",
+      "parts resource changes", "resource changes",
       "что нового в parts resource", "версия 6", "ver.6", "версии 6", "версией 6"),
      "parts-resource-changes"),
-    (("изменения parts intellect", "parts intellect changes", "intellect changes",
+    (("изменения parts intellect", "изменения в parts intellect",
+      "изменение в parts intellect", "изменение parts intellect",
+      "что изменилось в parts intellect",
+      "parts intellect changes", "intellect changes",
       "что нового в parts intellect", "версия 5", "ver.5", "версии 5", "версией 5"),
      "parts-intellect-changes"),
     (("диадок", "сервис диадок", "скб контур", "контур",
@@ -89,7 +95,8 @@ PRODUCT_NAMES_SYSTEM = [
 
 PRODUCT_NAMES_TOPIC = [
     (("график поставок", "графики поставок", "плановая дата поставки",
-      "график поставки"),
+      "график поставки", "плановой даты поставки", "плановую дату поставки",
+      "расчет плановой даты", "расчёт плановой даты"),
      "delivery_schedule"),
     (("wazzup",), "wazzup"),
     (("тсд", "терминал сбора данных"), "tsd"),
@@ -144,6 +151,12 @@ _WEBSITE_TERMS = ("сайт", "интернет-магазин", "интерне
 _PAYMENT_TERMS = ("эквайринг", "эквайринга", "оплат", "платеж", "платёж")
 _POS_COUNTER_SIGNALS = ("касс", "розничн", "торговой", "торговая точка", "терминал",
                         " pos", "офис")
+
+# Платёжная экспансия: «эквайринг» — индикатор Parts.Intellect (POS), но без
+# POS-сигналов (терминал/касса/розница/офис) запрос может касаться способов оплаты
+# и онлайн-касс Parts.Resource, страницы которых слово «эквайринг» не содержат.
+# Добавляем стемы платёжного контекста в FTS-реколл и скорринг.
+_PAYMENT_EXPANSION = ("оплат", "платеж", "касс", "онлайн", "сбп")
 
 
 def web_payment_product(query):
@@ -446,7 +459,8 @@ def _score_row(r, terms, require_all, min_hits=None):
     return (-matched, -title_hits, -ph, score, span)
 
 
-def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
+def search(terms, product=None, limit=5, snippets=True, _expand_names=False,
+           _force_or=False):
     if not os.path.exists(DB_PATH):
         sys.exit(f"Индекс не найден: {DB_PATH}. Запустите scripts/build_index.py")
     _detect_index_change()
@@ -525,7 +539,7 @@ def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
             if len(ranked) >= RECALL_MIN:
                 break
 
-    if len(ranked) < RECALL_MIN:
+    if len(ranked) < RECALL_MIN or _force_or:
         seen = {(x[5][0], x[5][1]) for x in ranked}
         raw_or = fetch(fts_query(terms, "OR"))
         for r in raw_or:
@@ -553,6 +567,25 @@ def search(terms, product=None, limit=5, snippets=True, _expand_names=False):
     if not rows and not product and not _expand_names:
         rows, _ = search(terms, product=product, limit=limit, snippets=snippets, _expand_names=True)
     return rows, elapsed
+
+
+def payment_resource_rows(query, limit=4):
+    """Релевантные Parts.Resource страницы для платёжного запроса без POS-сигналов.
+
+    «Эквайринг/способы оплаты/онлайн-касса»: страницы Parts.Intellect содержат
+    слово «эквайринг», а страницы Parts.Resource («Настройка способов оплаты»,
+    «Онлайн-кассы») — нет, поэтому дополняем кросс-продуктовый пул отдельным
+    продукт-ограниченным поиском с платёжной экспансией терминов.
+    """
+    pterms = _correct_terms(normalize_terms(terms(query)))
+    if not any(t.startswith("эквайринг") for t in pterms):
+        return []
+    if any(t.startswith(s.strip()) for t in pterms for s in _POS_COUNTER_SIGNALS):
+        return []
+    expanded = list(dict.fromkeys(pterms + list(_PAYMENT_EXPANSION)))
+    rows, _ = search(expanded, product="parts-resource-guide", limit=limit,
+                     snippets=False, _force_or=True)
+    return rows
 
 
 def fallback_like(terms, product, limit):
@@ -1198,6 +1231,20 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
             if wide_cov > det_cov:
                 rows = wide_rows
                 meta = wide_meta
+
+    # Платёжная экспансия Parts.Resource: «эквайринг…» без POS-сигналов — обычно про
+    # POS-терминал Parts.Intellect, но пользователи ждут и способы оплаты/онлайн-кассу
+    # Parts.Resource (страницы которых слово «эквайринг» не содержат). Дополняем пул
+    # отдельным продукт-ограниченным поиском сразу после ведущего ответа.
+    if (detected_product is None and product is None and rows and not web_payment):
+        pr_rows = payment_resource_rows(query, limit=4)
+        if pr_rows:
+            seen = {(r[0], r[1]) for r in rows}
+            sec = [r for r in pr_rows if (r[0], r[1]) not in seen]
+            if sec:
+                rows = ([rows[0]] + sec
+                        + [r for r in rows[1:] if (r[0], r[1]) not in seen])
+                rows = rows[:limit]
 
     # Fallback по раскладке: только когда результат слабый (пустой или шумный).
     if product is None and rows:

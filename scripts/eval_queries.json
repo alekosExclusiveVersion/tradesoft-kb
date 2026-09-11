@@ -1,5 +1,5 @@
 {
- "note": "Веха 2026-09-10: расширение набора до 103 запросов синтетикой по toc всех продуктов + реальные запросы из kb_access.db. Старый набор 47 сохранён без изменений. (+ фикс expected: аналоги/диадок/филиал/мета-теги) (+8 запросов из реальных логов search_events) (+фикс expected: выгрузка прайсов в синхронизаторе)",
+ "note": "Веха 2026-09-10: расширение набора до 103 запросов синтетикой по toc всех продуктов + реальные запросы из kb_access.db. Старый набор 47 сохранён без изменений. (+ фикс expected: аналоги/диадок/филиал/мета-теги) (+8 запросов из реальных логов search_events) (+фикс expected: выгрузка прайсов в синхронизаторе) (+2026-09-11 expected: остатки/диадок обновлены под актуальную структуру: полная страница отчёта в «Складские отчеты», «Взаимодействие с системой Диадок» с перечнем передаваемых документов)",
  "queries": [
   {
    "q": "подключить нового поставщика",
@@ -56,6 +56,7 @@
   {
    "q": "остатки на складе",
    "expected": [
+    "parts-intellect-guide__otchet_ob_ostatkakh_otchet_ob_ostatkakh_skladskie_otchety_otchety_v_sisteme.htm.md",
     "parts-intellect-guide__otchet_ob_ostatkakh.htm.md",
     "parts-resource-guide__skladskie_ostatki.htm.md",
     "parts-intellect-guide__rasshirennyj_otchet_ob_ostatkakh.htm.md"
@@ -512,6 +513,7 @@
   {
    "q": "какие документы можно обменивать с диадок",
    "expected": [
+    "parts-intellect-guide__vzaimodejstvie_s_sistemoj_diadok_dopolnitelnye_vozmozhnosti.htm.md",
     "diadok__ehksport_dokumentov_v_diadok.htm.md",
     "diadok__index.htm.md",
     "diadok__nastrojki_pravila_importa.htm.md"

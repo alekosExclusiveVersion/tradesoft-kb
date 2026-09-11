@@ -570,8 +570,22 @@ def _asks_for_changes(query):
 # материалы (все «печать чека» Parts.Resource) не попадали в related_docs.
 DOCS_MERGE_TOP = 24
 
+# API-справочники (parts-index-rest-api, parts-resource-rest-api) — в них
+# справочный контент (методы, параметры, коды ответов), который
+# для обычных (не-API) запросов не релевантен, но выбивается в топ из-за
+# общих терминов («оплаты по банковским картам»). Для запросов без API-маркеров
+# сдвигаем их вниз; для самих API-запросов демпт не применяем.
+_API_QUERY_MARKERS = ("api", "rest", "токен", "token", "endpoint", "метод",
+                      "http", "авторизаци", "ключ")
+_API_DEMOTE_RANK = 8
 
-def merge_results(docs, solutions, crm, max_docs=DOCS_MERGE_TOP, max_solutions=5, max_crm=3):
+
+def _api_intent(query):
+    return any(m in query.lower() for m in _API_QUERY_MARKERS)
+
+
+def merge_results(docs, solutions, crm, max_docs=DOCS_MERGE_TOP, max_solutions=5, max_crm=3,
+                  query=""):
     """Объединяет результаты из 3 источников в единый список.
 
     Скоры разных источников несопоставимы (docs: гибрид/BM25, бывает
@@ -581,10 +595,14 @@ def merge_results(docs, solutions, crm, max_docs=DOCS_MERGE_TOP, max_solutions=5
     Исходный скор сохраняется в 'raw_score'.
     """
     all_results = []
+    api_intent = _api_intent(query)
 
     for i, r in enumerate(docs[:max_docs]):
         r["raw_score"] = r.get("score", 0)
-        r["score"] = round(1.0 * (0.92 ** i), 3)
+        rank = i
+        if not api_intent and (r.get("product") or "").endswith("-rest-api"):
+            rank += _API_DEMOTE_RANK
+        r["score"] = round(1.0 * (0.92 ** rank), 3)
         r["product_canonical"] = _normalize_product("docs", r.get("product"))
         all_results.append(r)
 
@@ -996,7 +1014,7 @@ def _cross_search_impl(query, max_answers, limit_per_source):
                 print(f"[{source}] future error: {e}", file=sys.stderr)
 
     # 3. Merge + Compose with cross-links
-    merged = merge_results(doc_results, sol_results, crm_results)
+    merged = merge_results(doc_results, sol_results, crm_results, query=query)
 
     cross_links = None
     try:
