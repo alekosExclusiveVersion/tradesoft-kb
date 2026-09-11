@@ -150,7 +150,7 @@ class DocsSource:
         self._threading = threading
         self._hybrid_timeout_ms = hybrid_timeout_ms
 
-    def search(self, query, product=None, limit=5):
+    def search(self, query, product=None, limit=5, _skip_auto_product=False):
         """Возвращает list[dict] с ключами: path, product, title, snippet, score.
 
         Использует гибридный поиск с таймаутом: если semantic search не
@@ -160,7 +160,8 @@ class DocsSource:
 
         def _do_hybrid():
             try:
-                rows, _ = self._search(query, product, limit=limit)
+                rows, _ = self._search(query, product, limit=limit,
+                                       _skip_auto_product=_skip_auto_product)
                 result_holder[0] = rows
             except Exception:
                 pass
@@ -587,6 +588,12 @@ def _asks_for_changes(query):
 # материалы (все «печать чека» Parts.Resource) не попадали в related_docs.
 DOCS_MERGE_TOP = 24
 
+# Feature-продукты, чья тема существует в нескольких системах (график поставок —
+# в Parts.Resource/Parts.Intellect; маркетплейс — в Parts.Intellect + Resource и
+# т.п.). При детекте такого продукта пул дополняется широким поиском, чтобы в
+# ответе появлялись карточки остальных продуктов (см. _search_docs).
+_FEATURE_CROSS_PRODUCTS = {"delivery"}
+
 # API-справочники (parts-index-rest-api, parts-resource-rest-api) — в них
 # справочный контент (методы, параметры, коды ответов), который
 # для обычных (не-API) запросов не релевантен, но выбивается в топ из-за
@@ -984,8 +991,32 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             # сдвигает позиционные скоры и ломает порядок групп (например, у
             # «печать чеков» Sync обгонял Parts.Resource в top-2). Отсеиваем их
             # при компоновке блоков (см. compose_answers), сохраняя ранги.
-            return [r for r in rows
+            rows = [r for r in rows
                     if not ("-changes" in (r.get("product") or ""))]
+
+            # Тематическая экспансия: детектированный feature-продукт не сужает
+            # тему — страницы «график поставок» есть и в Parts.Resource, и в
+            # Parts.Intellect. Дополняем пул широким (без авто-детекта) поиском,
+            # отбрасывая страницы самого feature-продукта; compose соберёт из них
+            # отдельные карточки ответа ниже lead-карточки.
+            if product in _FEATURE_CROSS_PRODUCTS:
+                try:
+                    wide = ds.search(query, None,
+                                     limit=max(limit_per_source, DOCS_MERGE_TOP),
+                                     _skip_auto_product=True)
+                except Exception as e:
+                    print(f"[docs] расширение пула: {e}", file=sys.stderr)
+                    wide = []
+                seen = {(r.get("product"), r.get("page")) for r in rows}
+                for r in wide:
+                    if "-changes" in (r.get("product") or ""):
+                        continue
+                    if (r.get("product"), r.get("page")) in seen:
+                        continue
+                    if _normalize_product("docs", r.get("product")) == product:
+                        continue
+                    rows.append(r)
+            return rows
         except Exception as e:
             print(f"[docs] error: {e}", file=sys.stderr)
             return []

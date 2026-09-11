@@ -1171,7 +1171,7 @@ def _result_term_coverage(query, rows):
 
 
 def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
-                  with_meta=False):
+                  with_meta=False, _skip_auto_product=False):
     """Гибридный поиск с распознаванием продукта и исправлением раскладки.
 
     with_meta: дополнительно возвращать meta из fuse ((rows, elapsed, meta)).
@@ -1185,13 +1185,18 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
       кириллице и возвращаем его, если он заметно лучше. Легитимный латинский
       транслит (например «nastrojka onlajn kassy») при этом не ломается, т.к.
       кириллический вариант по качеству не превосходит основной.
+
+    _skip_auto_product: не определять продукт по запросу вообще (продукт
+    остаётся None) — кросс-продуктовый поиск по всем продуктам для внешнего
+    вызывает, которому нужен именно широкий пул (см. cross_search тематическую
+    экспансию).
     """
     _detect_index_change()
-    if product is None:
+    if product is None and not _skip_auto_product:
         product = detect_product_name(query)
     detected_product = product
     web_payment = False
-    if product is None:
+    if product is None and not _skip_auto_product:
         p = web_payment_product(query)
         if p:
             product = p
