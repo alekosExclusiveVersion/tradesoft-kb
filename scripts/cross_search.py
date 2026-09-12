@@ -637,18 +637,45 @@ _CROSS_TOPIC_OTHER = {
     },
 }
 
-# Приоритетные страницы Parts.Resource, раскрывающие подвопрос «принимать
-# оплаты на сайте», когда основной блок ответа — «Настройка онлайн-кассы»
-# (покрывает чеки + кассу, но не все шаги по оплате). Порядок = приоритет.
-# Списки обновляются через fetch-скрипт (scripts/fetch.sh), а при изменении
-# нужно обновить и manifests.
-_PAYMENT_FOLLOWUP_PAGES = {
-    "parts_resource": [
-        "priem_onlajn_platezhej.htm.md",
-        "nastrojka_sposobov_oplaty.htm.md",
-        "pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md",
-    ],
+# Подвопросы темы «печать чеков / касса / оплаты» и страницы, раскрывающие их
+# как последовательные блоки карточек (полноценный ответ вместо ссылки в related):
+#   Parts.Resource (интернет-магазин):
+#     оплаты на сайте → «Прием онлайн платежей», «Настройка способов оплаты»;
+#   Parts.Intellect (POS):
+#     печать чеков    → «Настройка подключения ККТ»,
+#     POS-терминал    → «Настройка подключения Эквайринга» (типы терминалов:
+#                       интегрированный — Сбербанк / не интегрированный),
+#                       «Утилита для работы с POS-терминалом».
+_TOPIC_FOLLOWUP_BLOCKS = {
+    "parts_resource": {
+        "markers": ("оплат", "платеж", "касс", "онлайн", "сайт"),
+        "pages": [
+            "priem_onlajn_platezhej.htm.md",
+            "nastrojka_sposobov_oplaty.htm.md",
+            "pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md",
+        ],
+    },
+    "parts_intellect": {
+        "markers": ("печать чек", "печати чек", "печатать чек",
+                    "ккт", "терминал", "эквайринг", "онлайн-касс"),
+        "pages": [
+            "nastrojka_podklyucheniya_kkt.htm.md",
+            "nastrojka_podklyucheniya_ehkvajringa.htm.md",
+            "utilita_dlya_raboty_s_pos_terminalom.htm.md",
+        ],
+    },
 }
+
+
+def _topic_followup_pages(query, canonical):
+    """Страницы-подблоки для карточки canonical, релевантные теме запроса."""
+    cfg = _TOPIC_FOLLOWUP_BLOCKS.get(canonical)
+    if not cfg:
+        return ()
+    q = query.lower()
+    if not any(m in q for m in cfg["markers"]):
+        return ()
+    return cfg["pages"]
 
 
 def _cross_topic_other(query):
@@ -660,10 +687,18 @@ def _cross_topic_other(query):
     return {}
 
 
-def _has_payment_subquestion(query):
-    """Запрос содержит подвопрос про приём/настройку оплат на сайте."""
+def _related_query(query):
+    """Запрос для поиска «родственных материалов» в related_docs.
+
+    Для кросс-продуктовых тем (печать чеков) полный шумный запрос
+    («... resource b принимать оплаты на сайте?») выдаёт в FTS чужеродные
+    страницы («Создание нового заказа клиента») — связанные материалы ищем
+    по самой теме.
+    """
     q = query.lower()
-    return ("оплат" in q or "платеж" in q) and ("сайт" in q or "онлайн" in q or "интернет" in q)
+    if any(t in q for t in _CROSS_PRODUCT_TOPICS):
+        return "печать чеков"
+    return query
 
 # API-справочники (parts-index-rest-api, parts-resource-rest-api) — в них
 # справочный контент (методы, параметры, коды ответов), который
@@ -896,22 +931,30 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
 
         blocks = [primary_block]
 
-        # Полноценный последовательный ответ: если запрос содержит несколько
-        # подвопросов (печать чеков + приём оплат на сайте), добавляем подблоки
+        # Полноценный последовательный ответ: если в запросе несколько подвопросов
+        # (печать чеков + оплаты на сайте + ККТ/POS-терминал), добавляем подблоки
         # с раскрытием остальных частей, чтобы ответ был исчерпывающим, а не
-        # ссылкой на related. Блоки — приоритетные страницы из пула документации
-        # (см. _PAYMENT_FOLLOWUP_PAGES), не более 2.
-        if (primary_block.get("source") == "docs"
-                and _has_payment_subquestion(query)
-                and prod in _PAYMENT_FOLLOWUP_PAGES):
-            added_paths = {primary_block.get("path")}
-            for page in _PAYMENT_FOLLOWUP_PAGES[prod]:
-                if len(blocks) >= 3:
+        # ссылкой на related. Страницы — из приоритетного списка карточки
+        # продукта (см. _TOPIC_FOLLOWUP_BLOCKS), не более 2 подблоков.
+        followup_pages = []
+        if primary_block.get("source") == "docs":
+            followup_pages = _topic_followup_pages(query, prod)
+        if followup_pages:
+            added_paths = {b.get("path") for b in blocks}
+            for page in followup_pages:
+                if len(blocks) >= 4:
                     break
                 match = next((r for r in pools.get("docs", [])
                               if r.get("page") == page
                               and r.get("product") == primary_block.get("product")
                               and r.get("path") != primary_block.get("path")), None)
+                if not match:
+                    try:
+                        match = _get_docs_source().get_by_path(
+                            f"{primary_block.get('product')}__{page}")
+                    except Exception as e:
+                        print(f"[docs] подблок {page}: {e}", file=sys.stderr)
+                        match = None
                 if not match or match.get("path") in added_paths:
                     continue
                 m = dict(match)
@@ -964,12 +1007,11 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
                         # И другие релевантные страницы того же продукта
                         # (собраны поиском, но не вошли в блок, включая
                         # фрагменты-дополнения вроде «Правил… по СНО»).
-                        # Страницы, ставшие подблоками (cross_expand), в related
-                        # не дублируем — они уже раскрыты в карточке.
+                        block_paths = {d.get("path") for d in blocks}
                         sec_docs = [r for r in pools.get("docs", [])
                                     if r.get("path") != b.get("path")
                                     and "," not in (r.get("product") or "")
-                                    and not r.get("cross_expand")]
+                                    and r.get("path") not in block_paths]
                         sec_docs.sort(key=lambda r: r.get("score", 0), reverse=True)
                         for sd in sec_docs[:5]:
                             if not any(d.get("path") == sd["path"]
@@ -993,7 +1035,7 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
                         # Родственные материалы продукта по запросу (FTS-only):
                         # гибридный топ-8 обрезает их (например, всю «печать
                         # чеков» Parts.Resource), related не должен пустовать.
-                        for rd in _docs_fts_related(query, b.get("product"),
+                        for rd in _docs_fts_related(_related_query(query), b.get("product"),
                                                     exclude={b.get("path")},
                                                     limit=8):
                             if len(answer["related_docs"]) >= 12:
@@ -1167,24 +1209,6 @@ def _cross_search_impl(query, max_answers, limit_per_source):
                     # max_docs (они всегда идут в хвосте пула), а compose не даёт
                     # решению «обогнать» карточку документации по теме.
                     _append_unseen(add, flag="chek")
-
-            # Запрос с несколькими подвопросами (« печать чеков + оплаты на
-            # сайте»). Ведущая страница (Настройка онлайн-кассы) покрывает оба,
-            # но вторая часть (приём/настройка оплат) раскрывается досконально
-            # только в виде последовательных подблоков. Их подтягиваем из
-            # приоритетного списка, чтобы ответ был полноценным.
-            if _has_payment_subquestion(query):
-                # Определяем pid доминирующего продукта по реальным строкам пула
-                pid = next((r.get("product") for r in rows
-                            if _normalize_product("docs", r.get("product")) == dominant), None)
-                if pid:
-                    for p in _PAYMENT_FOLLOWUP_PAGES.get(dominant, ()):
-                        if any(r.get("page") == p for r in rows):
-                            continue
-                        r = ds.get_by_path(f"{pid}__{p}")
-                        if r and r.get("content"):
-                            r["cross_expand"] = "payment"
-                            rows.append(r)
             return rows
         except Exception as e:
             print(f"[docs] error: {e}", file=sys.stderr)
