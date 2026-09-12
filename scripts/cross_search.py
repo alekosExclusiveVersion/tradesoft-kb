@@ -15,6 +15,7 @@
 """
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -700,6 +701,103 @@ def _related_query(query):
         return "печать чеков"
     return query
 
+# ---------------------------------------------------------------------------
+# Адаптивные заголовки блоков («модуль · действие»)
+# ---------------------------------------------------------------------------
+# Из «сырых» названий страниц генерируем пару (module, action): функционал и
+# действие, которое он описывает. Заголовок блока и карточки строится как
+# «Продукт · Модуль · Действие». Остальные поля (module/action/role/step)
+# проходят в структуру ответа и уже там адаптируются интерфейсами.
+_ACTION_PREFIX = (
+    ("Настройка подключения и ", "подключение и настройка"),
+    ("Настройка подключения ", "подключение"),
+    ("Настройка ", "настройка"),
+    ("Настройки ", "настройка"),
+    ("Подключение и настройка ", "подключение и настройка"),
+    ("Подключение ", "подключение"),
+    ("Прием ", "приём"),
+    ("Печать ", "печать"),
+    ("Процесс ", "процесс"),
+    ("Утилита для работы с ", "утилита"),
+    ("Поступление ", "поступление"),
+    ("Оплата ", "оплата"),
+    ("Оформление ", "оформление"),
+    ("Создание ", "создание"),
+    ("Формирование ", "формирование"),
+    ("Восстановление ", "восстановление"),
+    ("Импорт ", "импорт"),
+    ("Экспорт ", "экспорт"),
+)
+
+# Приведение падежных форм модуля к начальной (только частые обороты).
+_MODULE_FIXES = {
+    "онлайн-кассы": "онлайн-касса",
+    "способов оплаты": "способы оплаты",
+    "онлайн платежей": "онлайн-платежи",
+    "подключения ККТ": "ККТ",
+    "POS-терминалом": "POS-терминал",
+    "эквайринга": "эквайринг",
+    "печати чеков": "печать чеков",
+    "принтера чеков": "принтер чеков",
+    "графиков поставок": "графики поставок",
+    "заказа клиента": "заказ клиента",
+}
+
+# Исключения по пути страницы — там, где правило из заголовка даёт неадекватный
+# оборот (общие «Процесс …», «Утилита …» и т.п.). Добавляем только точечно.
+_HEADER_EXCEPTIONS = {
+    "parts-intellect-guide__protsess_pechati_chekov_v_programme.htm.md":
+        ("Печать чеков", "процесс в программе"),
+    "parts-resource-guide__pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md":
+        ("Чек", "печать при онлайн-оплате"),
+    "parts-intellect-guide__nastrojka_podklyucheniya_ehkvajringa.htm.md":
+        ("Эквайринг (POS-терминал)",
+         "тип терминала: интегрированный (Сбербанк) / не интегрированный"),
+}
+
+
+def _fix_module(module):
+    return _MODULE_FIXES.get(module, module)
+
+
+def _header_parts(block):
+    """Возвращает (module, action) для блока по названию страницы."""
+    title = (block.get("title") or "").strip()
+    exc = _HEADER_EXCEPTIONS.get(block.get("path") or "")
+    if exc:
+        return exc
+    for prefix, action in _ACTION_PREFIX:
+        if title.startswith(prefix):
+            module = _fix_module(title[len(prefix):].strip())
+            return module, action
+    return title or None, None
+
+
+def enrich_block_headings(blocks):
+    """Проставляет блокам module/action/display_title/role/step.
+
+    docs-блоки получают порядковый номер шага в карточке (1..N по всем
+    источникам docs), остальные источники — свой тип в роли без шага.
+    """
+    step_n = 0
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        if b.get("source") == "docs":
+            step_n += 1
+            b["role"] = "step"
+            b["step"] = step_n
+        else:
+            b["role"] = b.get("source", "docs")
+            b["step"] = None
+        module, action = _header_parts(b)
+        b["module"] = module
+        b["action"] = action
+        if action:
+            b["display_title"] = f"{module} · {action}"
+        else:
+            b["display_title"] = module or b.get("title", "")
+
 # API-справочники (parts-index-rest-api, parts-resource-rest-api) — в них
 # справочный контент (методы, параметры, коды ответов), который
 # для обычных (не-API) запросов не релевантен, но выбивается в топ из-за
@@ -963,9 +1061,19 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
                 blocks.append(m)
                 added_paths.add(match.get("path"))
 
+        # Адаптивные заголовки: «модуль · действие» + роль и номер шага по
+        # карточке (данные для интерфейсов, скрытый порядок не меняется).
+        enrich_block_headings(blocks)
+
         if blocks:
+            if blocks[0].get("module"):
+                answer_title = f"{PRODUCT_DISPLAY_NAME.get(prod, prod)}\u00a0·\u00a0{blocks[0]['module']}"
+                if blocks[0].get("action"):
+                    answer_title += f"\u00a0·\u00a0{blocks[0]['action']}"
+            else:
+                answer_title = blocks[0].get("title", "")
             answer = {
-                "title": blocks[0].get("title", ""),
+                "title": answer_title,
                 "product": PRODUCT_DISPLAY_NAME.get(prod, prod) if prod != "general" else None,
                 "product_id": prod if prod != "general" else None,
                 "blocks": blocks,
