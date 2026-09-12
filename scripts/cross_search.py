@@ -172,7 +172,9 @@ class DocsSource:
         t.join(timeout=self._hybrid_timeout_ms / 1000.0)
 
         # If hybrid timed out, use FTS-only fallback
+        degraded = False
         if not result_holder[0]:
+            degraded = True
             try:
                 from search import terms, search
                 fts_terms = terms(query)
@@ -201,6 +203,7 @@ class DocsSource:
                 "content_full": "",
                 "score": score,
                 "url": _build_doc_url(prod, page),
+                "_degraded": degraded,
             }
             results.append(entry)
             pending.append(entry)
@@ -1164,26 +1167,26 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
 # Main search function
 # ---------------------------------------------------------------------------
 
-# LRU cache for repeated queries (maxsize=128, ttl handled by caller)
-@lru_cache(maxsize=128)
-def _cross_search_cached(query, max_answers, limit_per_source):
-    """Кешированный inner cross_search (ключ = query + params)."""
-    return _cross_search_impl(query, max_answers, limit_per_source)
-
-
 def cross_search(query, max_answers=2, limit_per_source=5):
-    """Единый поиск из 3 источников (с кешем).
+    """Единый поиск из 3 источников.
 
     Возвращает dict с ключами:
       - answers: list[Answer] — структурированные ответы
       - intent: str — определённый интент
       - product: str|None — определённый продукт
       - latency_ms: int — время выполнения
+
+    Результаты НЕ кэшируются в LRU: деградированный ответ (гибрид не успел за
+    таймаут и результаты взяты из FTS-only fallback) нельзя замораживать —
+    идентичный запрос под нагрузкой должен пересчитываться заново. При тёплом
+    гибриде запрос занимает доли секунды, поэтому после потери кэша API не
+    деградирует.
     """
     _ensure_index_fresh()
     t0 = time.time()
-    result = _cross_search_cached(query, max_answers, limit_per_source)
-    result["latency_ms"] = int((time.time() - t0) * 1000)
+    result = _cross_search_impl(query, max_answers, limit_per_source)
+    result.pop("_degraded", None)
+    latency_ms = int((time.time() - t0) * 1000)
     return result
 
 
@@ -1344,6 +1347,7 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             return []
 
     # Parallel execution
+    degraded_docs = False
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
             executor.submit(_search_docs): "docs",
@@ -1356,6 +1360,11 @@ def _cross_search_impl(query, max_answers, limit_per_source):
                 result = future.result()
                 if source == "docs":
                     doc_results = result
+                    # Служебный флаг деградации — для решения о кэшировании,
+                    # в строки-блоки попадать не должен.
+                    degraded_docs = any(r.get("_degraded") for r in doc_results)
+                    for r in doc_results:
+                        r.pop("_degraded", None)
                 elif source == "solutions":
                     sol_results = result
                 elif source == "crm":
@@ -1393,6 +1402,9 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             "solutions": len(sol_results),
             "crm": len(crm_results),
         },
+        # Деградация: хотя бы один docs-пул получен через FTS-only fallback
+        # (гибрид не успел за таймаут). Такой результат кэшировать нельзя.
+        "_degraded": degraded_docs,
     }
 
 

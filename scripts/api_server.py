@@ -229,6 +229,20 @@ class APIHandler(BaseHTTPRequestHandler):
             sys.stderr.write(f"[{self.log_date_time_string()}] {format % args}\n")
 
 
+def _warmup():
+    """Однократный поисковый запрос до начала обслуживания.
+
+    Источники cross_search инициализируются лениво; первый запрос под
+    одновременной нагрузкой (corp-домен) может завершиться деградированным
+    результатом, который затем вечно отдаётся из LRU-кэша. Прогрев выполняет
+    инициализацию в одиночном потоке до приёма внешних запросов.
+    """
+    try:
+        cross_search("прогрев кэша", max_answers=1, limit_per_source=5)
+    except Exception as e:
+        print(f"[warmup] error: {e}", file=sys.stderr)
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Unified Search API")
@@ -236,6 +250,7 @@ def main():
     args = parser.parse_args()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), APIHandler)
+    _warmup()
     print(f"Unified Search API запущен на http://127.0.0.1:{args.port}")
     print(f"Эндпоинты:")
     print(f"  GET /api/answer?q=...&max=2")
