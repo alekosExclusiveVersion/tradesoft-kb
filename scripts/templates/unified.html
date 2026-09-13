@@ -237,15 +237,15 @@ function renderResults(data) {
     for (const answer of data.answers) {
         html += `<div class="answer-card">`;
         html += `<h3>${escapeHtml(answer.title)}</h3>`;
-        if (answer.product) {
-            html += `<div class="product">${escapeHtml(answer.product)}</div>`;
-        }
 
         // Blocks
         for (const block of answer.blocks) {
             const head = block.display_title || block.title || '';
             const step = (block.role === 'step' && block.step) ? `Шаг ${block.step}` : '';
             html += `<div class="block ${block.block_type}">`;
+            if (head) {
+                html += `<h4 class="block-head">${escapeHtml(head)}</h4>`;
+            }
             html += `<div class="block-meta"><span class="block-type">${blockLabel(block.block_type)}</span>`;
             if (step) {
                 html += `<span class="block-step">${step}</span>`;
@@ -255,9 +255,6 @@ function renderResults(data) {
                 html += ` — <a href="${block.url}" target="_blank">источник</a>`;
             }
             html += `</span></div>`;
-            if (head) {
-                html += `<h4 class="block-head">${escapeHtml(head)}</h4>`;
-            }
             html += `<div class="block-content">${renderContent(stripLeadingTitle(block.content, block.title), docBase(block.path))}</div>`;
             html += `</div>`;
         }

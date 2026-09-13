@@ -751,6 +751,8 @@ _MODULE_FIXES = {
 _HEADER_EXCEPTIONS = {
     "parts-intellect-guide__protsess_pechati_chekov_v_programme.htm.md":
         ("Печать чеков", "процесс в программе"),
+    "parts-intellect-guide__sozdanie_novogo_zakaza_klienta.htm.md":
+        ("Создание нового заказа", ""),
     "parts-resource-guide__pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md":
         ("Чек", "печать при онлайн-оплате"),
     "parts-intellect-guide__nastrojka_podklyucheniya_ehkvajringa.htm.md":
