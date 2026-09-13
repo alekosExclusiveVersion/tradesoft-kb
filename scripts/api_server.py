@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Unified Search API — единый API для кроссплатформенного поиска.
 
-Предоставляет REST API для поиска по 3 источникам (docs/solutions/CRM)
-с структурированными ответами.
+Предоставляет REST API для поиска по источникам
+docs / solutions / CRM с структурированными ответами (карточки ответов).
+Запускается через launchd (com.tradesoft.cross-search-api), порт 8055.
 
 Эндпоинты:
-  GET /api/answer?q=...&max=2&product=auto
-  GET /api/health
-  GET /api/meta
+  GET /api/answer?q=....&max=2&top=...   Полный поиск, карточки ответов
+  GET /api/page?product=...&page=...    Просмотр документа
+  GET /api/health                        Статус и свежесть индекса
+  GET /api/meta                          Метаданные модели
+  GET /                                  Web-UI (unified.html)
 
 Запуск:
   python3 api_server.py [--port 8055]
