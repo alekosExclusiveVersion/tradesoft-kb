@@ -746,18 +746,19 @@ _MODULE_FIXES = {
     "заказа клиента": "заказ клиента",
 }
 
-# Исключения по пути страницы — там, где правило из заголовка даёт неадекватный
-# оборот (общие «Процесс …», «Утилита …» и т.п.). Добавляем только точечно.
+# Исключения по пути страницы — там, где исходное название не подходит как
+# заголовок блока (общие «Процесс …», «Настройка подключения …» и т.п.).
+# Значение — естественный заголовок, который показывается после названия
+# продукта. Добавляем только точечно.
 _HEADER_EXCEPTIONS = {
     "parts-intellect-guide__protsess_pechati_chekov_v_programme.htm.md":
-        ("Печать чеков", "процесс в программе"),
+        "Печать чеков в программе",
     "parts-intellect-guide__sozdanie_novogo_zakaza_klienta.htm.md":
-        ("Создание нового заказа", ""),
+        "Создание нового заказа",
     "parts-resource-guide__pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md":
-        ("Чек", "печать при онлайн-оплате"),
+        "Печать чека аванса при оплате в онлайн",
     "parts-intellect-guide__nastrojka_podklyucheniya_ehkvajringa.htm.md":
-        ("Эквайринг (POS-терминал)",
-         "тип терминала: интегрированный (Сбербанк) / не интегрированный"),
+        "Настройка подключения эквайринга",
 }
 
 
@@ -766,11 +767,15 @@ def _fix_module(module):
 
 
 def _header_parts(block):
-    """Возвращает (module, action) для блока по названию страницы."""
+    """Возвращает (module, action) для блока по названию страницы.
+
+    Метаданные (module/action) оставлены в ответе для интерфейсов, но
+    заголовок блока строится из естественного названия страницы.
+    """
     title = (block.get("title") or "").strip()
     exc = _HEADER_EXCEPTIONS.get(block.get("path") or "")
     if exc:
-        return exc
+        return title, None
     for prefix, action in _ACTION_PREFIX:
         if title.startswith(prefix):
             module = _fix_module(title[len(prefix):].strip())
@@ -781,8 +786,11 @@ def _header_parts(block):
 def enrich_block_headings(blocks):
     """Проставляет блокам module/action/display_title/role/step.
 
-    docs-блоки получают порядковый номер шага в карточке (1..N по всем
-    источникам docs), остальные источники — свой тип в роли без шага.
+    display_title — естественное название страницы (с точечными
+    исключениями по пути), используется в интерфейсах; module/action —
+    справочные метаданные для API-потребителей. docs-блоки получают
+    порядковый номер шага в карточке (1..N по всем источникам docs),
+    остальные источники — свой тип в роли без шага.
     """
     step_n = 0
     for b in blocks:
@@ -798,10 +806,8 @@ def enrich_block_headings(blocks):
         module, action = _header_parts(b)
         b["module"] = module
         b["action"] = action
-        if action:
-            b["display_title"] = f"{module} · {action}"
-        else:
-            b["display_title"] = module or b.get("title", "")
+        b["display_title"] = _HEADER_EXCEPTIONS.get(b.get("path") or "",
+                                                    b.get("title") or module or "")
 
 # API-справочники (parts-index-rest-api, parts-resource-rest-api) — в них
 # справочный контент (методы, параметры, коды ответов), который
@@ -1071,10 +1077,8 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
         enrich_block_headings(blocks)
 
         if blocks:
-            if blocks[0].get("module"):
-                answer_title = f"{PRODUCT_DISPLAY_NAME.get(prod, prod)}\u00a0·\u00a0{blocks[0]['module']}"
-                if blocks[0].get("action"):
-                    answer_title += f"\u00a0·\u00a0{blocks[0]['action']}"
+            if blocks[0].get("display_title"):
+                answer_title = f"{PRODUCT_DISPLAY_NAME.get(prod, prod)}\u00a0·\u00a0{blocks[0]['display_title']}"
             else:
                 answer_title = blocks[0].get("title", "")
             answer = {
