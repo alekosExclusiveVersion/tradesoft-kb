@@ -1077,8 +1077,10 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
         enrich_block_headings(blocks)
 
         if blocks:
-            if blocks[0].get("display_title"):
-                answer_title = f"{PRODUCT_DISPLAY_NAME.get(prod, prod)}\u00a0·\u00a0{blocks[0]['display_title']}"
+            if prod != "general":
+                answer_title = PRODUCT_DISPLAY_NAME.get(prod, prod)
+            elif blocks[0].get("display_title"):
+                answer_title = blocks[0]["display_title"]
             else:
                 answer_title = blocks[0].get("title", "")
             answer = {
