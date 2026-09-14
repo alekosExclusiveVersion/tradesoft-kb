@@ -1202,11 +1202,11 @@ _LAST_IDX_MTIME = None
 
 
 def _ensure_index_fresh():
-    """Сброс LRU-ответов и заголовков страниц при пересборке индекса.
+    """Сброс кэша заголовков страниц при пересборке индекса.
 
-    Поисковый LRU (128 запросов) и _page_title без инвалидации отдавали бы
-    устаревшие данные до перезапуска/вытеснения. Индекс (cache/kb_index.db)
-    пересобирается build_index по WatchPaths — сверяем mtime на каждый запрос.
+    _page_title без инвалидации отдавал бы устаревшие данные до
+    перезапуска/вытеснения. Индекс (cache/kb_index.db) пересобирается
+    build_index по WatchPaths — сверяем mtime на каждый запрос.
     """
     global _LAST_IDX_MTIME
     try:
@@ -1219,7 +1219,6 @@ def _ensure_index_fresh():
     if mt == _LAST_IDX_MTIME:
         return
     _LAST_IDX_MTIME = mt
-    _cross_search_cached.cache_clear()
     _page_title.cache_clear()
 
 
