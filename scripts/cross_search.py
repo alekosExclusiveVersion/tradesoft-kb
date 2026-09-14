@@ -619,6 +619,26 @@ def _asks_for_changes(query):
     return any(h in q for h in _CHANGES_HINTS)
 
 
+# Вопросы, где changelog — прямой ответ («когда реализована возможность…»),
+# а не просто фон: в таких случаях версии должны опережать guide-страницы.
+_CHANGES_ANSWER_HINTS = ("когда", "с какой верси", "в какой верси",
+                         "какая верси", "в каком обновлени",
+                         "реализова", "ввели", "добавили")
+
+
+def _changes_are_answer(query):
+    """Niques, где список изменений отвечает на вопрос напрямую."""
+    q = query.lower()
+    return any(h in q for h in _CHANGES_ANSWER_HINTS)
+
+
+def _promote_changes(rows):
+    """Ставит -changes страницы в начало пула (стабильно по исходному скору)."""
+    changes = [r for r in rows if "-changes" in (r.get("product") or "")]
+    others = [r for r in rows if "-changes" not in (r.get("product") or "")]
+    return changes + others
+
+
 # Сколько docs-страниц берём из гибридного поиска в общий пул. RRF считает по
 # топ-30 (RRF_TOP) каждого источника, так что это лишь глубина среза; 8 было
 # мало — после среза в пулах продуктов оставалось по 1-2 страницы, и родственные
@@ -1262,6 +1282,12 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             # разных продуктов (Parts.Intellect, Parts.Resource, Sync...)
             rows = ds.search(query, None, limit=max(limit_per_source, DOCS_MERGE_TOP))
             if _asks_for_changes(query):
+                # Для вопросов «когда/в какой версии реализовано» changelog —
+                # это и есть прямой ответ, а не справочная страница. Ставим
+                # перечисленные версии в топ пула, чтобы они не отставали от
+                # guide-страниц по позиционному скору merge_results.
+                if _changes_are_answer(query):
+                    rows = _promote_changes(rows)
                 return rows
             # Подавляем changelog-шум: страницы *-changes попадают в топ для
             # обычных запросов («как направить seo» → «Версия 6.64»).
