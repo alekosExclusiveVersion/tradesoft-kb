@@ -573,6 +573,8 @@ PRODUCT_DISPLAY_NAME = {
     "wazzup": "Wazzup",
     "tsd": "ТСД",
     "marketplace": "Маркетплейсы",
+    "parts-intellect-changes": "Parts.Intellect · список изменений",
+    "parts-resource-changes": "Parts.Resource · список изменений",
     "var": "ВАР",
     "other": "Другое",
 }
