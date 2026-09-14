@@ -609,7 +609,8 @@ def _normalize_product(source_name, product_name):
 
 
 _CHANGES_HINTS = ("версия", "изменени", "что нового", "нового", "обновлени",
-                  "changelog", "release", "5.2", "5.1", "6.", "7.")
+                  "changelog", "release", "5.2", "5.1", "6.", "7.",
+                  "реализова", "когда", "какой верси")
 
 
 def _asks_for_changes(query):
