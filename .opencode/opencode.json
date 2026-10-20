@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "references": {
+    "kb-products": {
+      "path": "./products",
+      "description": "Исходные материалы базы знаний Tradesoft (markdown продуктов). Читать для уточнения деталей, уже найденных через index-поиск."
+    },
+    "kb-tech": {
+      "path": "./TECHNICAL.md",
+      "description": "Техническое описание устройства системы Tradesoft KB (индекс, API, скрипты, launchd, Typesense/Ollama)."
+    }
+  }
+}
