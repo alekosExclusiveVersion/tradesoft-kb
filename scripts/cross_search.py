@@ -33,6 +33,130 @@ sys.path.insert(0, SCRIPT_DIR)
 from intent import detect_intent, detect_product, classify_block, classify_results, Intent
 
 # ---------------------------------------------------------------------------
+# Расширение решений-ссылок на тикеты DokuWiki
+# (resolution вида «Ссыдка https://dokuwiki.tradesoft.ru/tickets:N …»)
+# ---------------------------------------------------------------------------
+
+_TICKET_URL_RE = re.compile(r"dokuwiki\.tradesoft\.ru/tickets:([\w.\-]+)")
+
+# Стемы, являющиеся именами продуктов. Когда product уже отфильтрован
+# отдельным условием, такие токены в AND-LIKE бесполезны (и даже вредны:
+# кейсы с псевдонимом auto_intellect не содержат подстроки «parts.intellect»).
+_SOL_PRODUCT_NAME_STEMS = {
+    "parts_intellect": frozenset({"parts.intellect", "autoинтеллект",
+                                  "интеллект", "parts"}),
+    "parts_resource": frozenset({"parts.resource", "parts"}),
+    "sync": frozenset({"синхронизатор", "sync"}),
+    "var": frozenset({"var"}),
+}
+
+
+def _ticket_from_cache(tid):
+    """Распарсенный тикет DokuWiki из локального raw-кэша ts-b24-knowledge.
+
+    Сеть не трогаем: читаем только файлы в data/wiki_tickets/raw/<id>.txt.
+    """
+    if not re.match(r"^[\w.\-]+$", tid or ""):
+        return None
+    raw_path = os.path.join(KNOWLEDGE_ROOT, "data", "wiki_tickets",
+                            "raw", tid + ".txt")
+    try:
+        with open(raw_path, encoding="utf-8") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    try:
+        know_scripts = os.path.join(KNOWLEDGE_ROOT, "scripts")
+        if know_scripts not in sys.path:
+            sys.path.insert(0, know_scripts)
+        from wiki_tickets import WikiTickets
+        return WikiTickets._parse(WikiTickets(), raw, tid)
+    except Exception:
+        return None
+
+
+def _expand_dokuwiki_links(resolution):
+    """Если resolution ссылается на dokuwiki-тикет, дополняем контент
+    распарсенным текстом тикета (Вопрос/Ответ/Примечание)."""
+    if not resolution or "dokuwiki" not in resolution:
+        return resolution
+    tids = list(dict.fromkeys(_TICKET_URL_RE.findall(resolution)))
+    if not tids:
+        return resolution
+    for tid in tids:
+        t = _ticket_from_cache(tid)
+        if not t:
+            continue
+        parts = []
+        if t.get("title"):
+            parts.append(t["title"])
+        for key, label in (("question", "Вопрос:"),
+                           ("answer", "Ответ:"),
+                           ("note", "Примечание:")):
+            v = (t.get(key) or "").strip()
+            if v:
+                parts.append(f"{label}\n{v}")
+        if parts:
+            resolution += "\n\n" + "\n".join(parts)
+    return resolution
+
+
+_TICKET_MIN_SCORE = 25.0  # minimum match score to attach a ticket as solution body
+
+
+def _tickets_for_case(case_id):
+    """Матчнутые тикеты (ticket_id, score) для кейса из matches.json.
+
+    Используем только надёжные (strong/medium, score >= 25) — их текст
+    почти наверняка отвечает на вопрос заявки. Дешёвые по подобию фраз
+    (weak) в текст решения не тащим.
+    """
+    try:
+        p = os.path.join(KNOWLEDGE_ROOT, "data", "wiki_tickets", "matches.json")
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        lst = (data.get("_reverse") or {}).get(case_id, [])
+    except Exception:
+        return []
+    out = []
+    for x in sorted(lst, key=lambda it: it.get("score") or 0, reverse=True):
+        if (x.get("score") or 0) >= _TICKET_MIN_SCORE:
+            out.append(x)
+        if len(out) >= 2:
+            break
+    return out
+
+
+def _expand_case_tickets(case_id, resolution):
+    """Дополняем резолюцию решения текстом матчнутых тикетов.
+
+    Для кейсов «без решения» (переписка не извлечена из заявки) ответ
+    живёт в докеринге: заявка сопоставлена тикету (matches.json), чей
+    текст — фактическое поведение и планы. Подтягиваем его в контент,
+    если в резолюции нет dokuwiki-ссылок и она почти пустая/короткая.
+    """
+    if (resolution or "").strip() and "dokuwiki" not in (resolution or ""):
+        return resolution
+    if len((resolution or "").strip().split("\n")) > 3:
+        return resolution
+    for x in _tickets_for_case(case_id):
+        t = _ticket_from_cache(x.get("ticket_id"))
+        if not t:
+            continue
+        parts = []
+        if t.get("title"):
+            parts.append(t["title"])
+        for key, label in (("question", "Вопрос:"),
+                           ("answer", "Ответ:"),
+                           ("note", "Примечание:")):
+            v = (t.get(key) or "").strip()
+            if v:
+                parts.append(f"{label}\n{v}")
+        if parts:
+            resolution = (resolution or "").rstrip() + "\n\n" + "\n".join(parts)
+    return resolution
+
+# ---------------------------------------------------------------------------
 # Source adapters (lazy singletons)
 # ---------------------------------------------------------------------------
 
@@ -324,6 +448,14 @@ class SolutionsSource:
         # Use stemmed tokens for better matching
         from intent import stem
         stemmed_tokens = [stem(t) for t in tokens]
+        # Имена продуктов бесполезны в AND-LIKE: продукт уже отфильтрован
+        # выше (или входит в WHERE), а в тексте кейсов часты псевдонимы
+        # (auto_intellect и т.п.) без дословного наименования.
+        if product:
+            drop = _SOL_PRODUCT_NAME_STEMS.get(product, frozenset())
+            stemmed_tokens = [t for t in stemmed_tokens if t not in drop]
+        if not stemmed_tokens:
+            return []
         n_tok = len(stemmed_tokens)
         max_score = 3.0 * n_tok  # title ×3 per token
 
@@ -371,8 +503,12 @@ class SolutionsSource:
             # Не совпал ни один токен — мусор, не отдаём
             if not (r["match_score"] or 0):
                 continue
-            # Берём первые 500 символов из resolution как snippet
-            resolution = (r["resolution"] or "")[:500]
+            # Берём первые 500 символов из resolution как сниппет;
+            # ссылки на тикеты DokuWiki расширяем текстом тикета.
+            resolution = _expand_dokuwiki_links(r["resolution"] or "")
+            resolution = _expand_case_tickets(r["id"], resolution)
+            if "Ответ:" not in resolution and "Вопрос:" not in resolution:
+                resolution = resolution[:500]
             # Нормированный скор совпадения (0..1): match_score / (3 × токенов).
             # Отличает попадание «по заголовку по всем словам» от случайного
             # совпадения одного стема в резолюции (confidence не подходит).
@@ -615,10 +751,34 @@ _CHANGES_HINTS = ("версия", "изменени", "что нового", "н
                   "реализова", "когда", "какой верси")
 
 
+@lru_cache(maxsize=256)
+def _corrected_query(query):
+    """Каноническая форма запроса с исправлением опечаток (какоq→какой).
+
+    Substring-хинты интента теряют опечатанные слова («в какоq версии…»),
+    из-за чего changelog-ответ не включает версию-кандидат. Канонизация с
+    правкой опечаток (search._canonical_query) — обычная стоимость каждого
+    запроса, здесь она переиспользуется для проверок интента.
+    """
+    try:
+        from search import _canonical_query
+        cq, _ = _canonical_query(query)
+        return cq or query
+    except Exception:
+        return query
+
+
+def _has_hint(query, hints):
+    q = query.lower()
+    if any(h in q for h in hints):
+        return True
+    cq = _corrected_query(query).lower()
+    return cq != q and any(h in cq for h in hints)
+
+
 def _asks_for_changes(query):
     """Запрос про версии/изменения → changelog-страницы уместны."""
-    q = query.lower()
-    return any(h in q for h in _CHANGES_HINTS)
+    return _has_hint(query, _CHANGES_HINTS)
 
 
 # Вопросы, где changelog — прямой ответ («когда реализована возможность…»),
@@ -630,15 +790,308 @@ _CHANGES_ANSWER_HINTS = ("когда", "с какой верси", "в како�
 
 def _changes_are_answer(query):
     """Niques, где список изменений отвечает на вопрос напрямую."""
-    q = query.lower()
-    return any(h in q for h in _CHANGES_ANSWER_HINTS)
+    return _has_hint(query, _CHANGES_ANSWER_HINTS)
 
 
-def _promote_changes(rows):
-    """Ставит -changes страницы в начало пула (стабильно по исходному скору)."""
+# Стоп-стемы, не несущие смысла для близости в changelog'ах («когда… в какой
+# версии это случилось»): они частотны сами по себе и их присутствие в тексте
+# версии только «притягивает» anchor в _proximity к шуму.
+_CHANGES_NOISE_STEMS = frozenset({
+    "когд", "какой", "это", "тот", "они", "теперь",
+    "происход", "случилось", "про",
+})
+
+# Мета-стемы вопросов про версии: вопросительные/служебные слова и глаголы
+# изменения («произошли изменения относительно…»), не несущие темы. Для
+# changelog-подхода (см. _rank_changelog) они выкидываются из «темы» запроса,
+# потому что засоряют и вектор, и лексику: «изменени» есть в каждом changelog
+# (df=472), «произой/относительн/перед» («переехало»→«перед») отсутствуют в
+# тексте правильной версии (5_17), из-за чего её вытесняют шумные кандидаты.
+_CHANGES_META_STEMS = frozenset({
+    "когд", "какой", "это", "тот", "они", "теперь",
+    "происход", "случилось", "про", "какие", "какая",
+    "произой", "изменен", "относительн", "верси", "перед",
+    "стали", "стало", "быть", "введен", "ввели",
+    "добавили", "добавлен", "реализован", "реализованн", "появился",
+    "вышел", "обновлен", "в", "с", "по", "на", "для", "про",
+})
+
+
+def _promote_changes(rows, query=""):
+    """Ставит -changes страницы в начало пула.
+
+    Внутри changelog'ов приоритет определяется релевантностью запросу: сначала
+    changelog продукта, названного в запросе («Parts.Intellect» → только его
+    -changes впереди, resource-версии ниже), затем по близости значимых стемов
+    запроса в тексте версии. Changelog-страницы большие (список изменений за
+    версию), поэтому «наличие слова» их не различает — важна близость: версия,
+    где «перенесен… шаблон… печатн» стоят рядом, отвечает точнее, чем список,
+    где те же слова раскиданы по разделу.
+
+    Дополнительно changelog'и делятся на «тематический ярус» — страницы, где
+    встречается хотя бы один редкий значимый стем запроса (df в 20..80 или
+    цифра в 1..80), — и остальные. Ярус релевантных версий идёт вперёд, остаток
+    вниз; так длинный запрос «…в какой версии это случилось?» не затягивает
+    версию, где значимые стемы разнесены, выше версии с локальной близостью.
+    """
     changes = [r for r in rows if "-changes" in (r.get("product") or "")]
     others = [r for r in rows if "-changes" not in (r.get("product") or "")]
+    if not changes:
+        return rows
+
+    from search import (_correct_terms, detect_product_name, normalize_terms,
+                        terms, ULTRA_COMMON, _term_doc_frequency)
+    product_name = detect_product_name(query) if query else None
+    base_product = (product_name or "").partition("-")[0] if product_name else None
+    stems = _correct_terms(normalize_terms(terms(query))) if query else []
+    meaningful = [t for t in stems if t not in ULTRA_COMMON]
+
+    def _proximity(r):
+        """Минимальная дистанция (символы) от самого редкого значимого стема
+        запроса до соседнего значимого стема. Большое число = стемы далеко,
+        версия плохо отвечает на вопрос."""
+        text = (r.get("content_full") or r.get("content") or "").lower()
+        if not text or not meaningful:
+            return 10 ** 7
+        occ = {}
+        for t in meaningful:
+            m = [mm.start() for mm in re.finditer(
+                r"(?<![a-zа-яё0-9])" + re.escape(t) + r"[a-zа-яё]*", text)]
+            if m:
+                occ[t] = m
+        if len(occ) < 2:
+            return 10 ** 7
+        anchor = min(occ, key=lambda t: (_term_doc_frequency(t), t))
+        others = [t for t in occ if t != anchor]
+        return min(abs(a - b)
+                   for a in occ[anchor]
+                   for b in [p for t in others for p in occ[t]])
+
+    def _changelog_key(r):
+        prod = r.get("product") or ""
+        # Приоритет 1: changelog того же продукта, что и в запросе.
+        same_line = 0 if (base_product and prod.partition("-")[0] == base_product) else 1
+        # Приоритет 2: плотность кластера значимых стемов.
+        return (same_line, _proximity(r))
+
+    def _df(t):
+        try:
+            return _term_doc_frequency(t)
+        except Exception:
+            return 10 ** 9
+
+    rare_tier = [t for t in meaningful
+                 if t not in _CHANGES_NOISE_STEMS
+                 and ((t.isdigit() and 0 < _df(t) <= 80)
+                      or (20 <= _df(t) <= 80))]
+
+    def _has_rare(r):
+        if not rare_tier:
+            return False
+        text = (r.get("content_full") or r.get("content") or "").lower()
+        return any(re.search(r"(?<![a-zа-яё0-9])" + re.escape(t) + r"[a-zа-яё]*", text)
+                   for t in rare_tier)
+
+    if rare_tier:
+        tier_top = [r for r in changes if _has_rare(r)]
+        tier_rest = [r for r in changes if not _has_rare(r)]
+    else:
+        tier_top, tier_rest = changes, []
+    tier_top.sort(key=_changelog_key)
+    changes = tier_top + tier_rest
     return changes + others
+
+
+# Сколько changelog-кандидатов из полного скана корпуса добавляем в начало пула
+# для change-answer запросов. Кандидаты идут первыми и получают позиционный
+# бонус при слиянии, поэтому тащим только релевантный топ.
+_CHANGELOG_RANK_TOP = 10
+
+_CHANGES_TOKEN_STOP = frozenset({
+    "в", "и", "с", "по", "на", "для", "не", "те", "их", "это",
+    "то", "том", "что", "за", "а", "или", "нужно", "как", "к",
+    "от", "у", "если", "также", "был", "была", "были", "было",
+})
+
+
+def _change_topic(query):
+    """Дистилляция «темы» вопроса про версии: отбрасывает мета-стемы и служебные
+    слова, возвращает (topic_str, topic_stems). topic_str — исходные токены для
+    векторного эмбеддинга, topic_stems — их корни для лексического слоя.
+    Пустая тема -> (None, None): ранкер деградирует к _promote_changes."""
+    from search import _correct_terms, normalize_terms, ULTRA_COMMON
+    topic_tokens, topic_stems = [], []
+    seen = set()
+    for tk in query.split():
+        if tk.lower() in _CHANGES_TOKEN_STOP:
+            continue
+        try:
+            stems = _correct_terms(normalize_terms([tk]))
+        except Exception:
+            continue
+        if not stems:
+            continue
+        s = stems[0]
+        if s in _CHANGES_META_STEMS or s in ULTRA_COMMON:
+            continue
+        topic_tokens.append(tk)
+        if s not in seen:
+            seen.add(s)
+            topic_stems.append(s)
+    if not topic_tokens or not topic_stems:
+        return None, None
+    return " ".join(topic_tokens), topic_stems
+
+
+def _rank_changelog(rows, query=""):
+    """Ставит changelog-страницы в начало пула для change-answer запросов.
+
+    В отличие от _promote_changes ранжирует changelog-корпус ПОЛНОСТЬЮ (все
+    -changes страницы всех продуктов, без ретривального гейта top-N): правильная
+    версия часто отсутствует в топ-24 гибрида, потому что мета-слова вопроса
+    («произошли/изменения/относительно») не встречаются в её тексте и FTS/вектор
+    ранжируют по зашумлённому полному запросу.
+
+    Два слоя скоринга:
+      - лексика (всегда): лучшая строка страницы — сколько уникальных стемов
+        темы встречается в одной строке, tie-break по ширине span. Стемы темы
+        нижесканятся по префиксным вариантам (без pymorphy): «база»→«баз»
+        ловит «базу/базе/базы», остальные корни уже являются префиксами форм
+        после среза гласного стемером («хранени» ⊆ «хранения»);
+      - вектор (если Ollama доступна): ранг vector_main(topic_str, <prod>-changes)
+        с таймаутом, чтобы не вешать запрос на зависший эмбеддер.
+    Композит: product-линия, затем vector_pos (вектор доминирует над лексикой),
+    затем лексический кортеж (cnt, span, редкие стемы).
+    """
+    topic_str, topic_stems = _change_topic(query)
+    if not topic_str:
+        # Тему не вычленить (вопрос почти весь из мета-слов) — прежнее поведение.
+        return _promote_changes(rows, query)
+
+    from search import _term_doc_frequency as _df, detect_product_name
+    base_product = None
+    try:
+        pn = detect_product_name(query)
+    except Exception:
+        pn = None
+    if pn:
+        base_product = pn.partition("-")[0]
+
+    # --- корпус changelog-страниц (из parsed-файлов, вне ретривного гейта) ---
+    corpus = []
+    for prod in ("parts-intellect-changes", "parts-resource-changes"):
+        d = os.path.join(KB_ROOT, "cache", prod, "parsed")
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            if fn.endswith(".htm.md"):
+                p = os.path.join(d, fn)
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        text = f.read()
+                except Exception:
+                    continue
+                corpus.append((prod, fn, text))
+    if not corpus:
+        return _promote_changes(rows, query)
+
+    # --- лексический слой: лучшая строка по уникальным стемам темы ---
+    VOWELS = "аяуюеио"
+
+    def _prefixes(s):
+        out = {s}
+        if len(s) >= 4 and s[-1] in VOWELS:
+            out.add(s[:-1])
+        return sorted(out, key=len, reverse=True)
+
+    stems = [(s, _prefixes(s)) for s in topic_stems]
+    rare = {s for s in topic_stems if _df(s) <= 40}
+    lex = {}  # (product, page) -> (cnt, span, rare_w)
+    for prod, page, text in corpus:
+        best = None
+        for line in text.splitlines():
+            line = line.lower()
+            mpos = {}
+            for s, pr in stems:
+                pos = None
+                for p2 in pr:
+                    m = re.search(
+                        r"(?<![a-zа-яё0-9])" + re.escape(p2) + r"[a-zа-яё]*",
+                        line,
+                    )
+                    if m and (pos is None or m.start() < pos):
+                        pos = m.start()
+                if pos is not None:
+                    mpos[s] = pos
+            if not mpos:
+                continue
+            cnt = len(mpos)
+            span = max(mpos.values()) - min(mpos.values()) + 1
+            rare_w = sum(2.0 if s in rare else 1.0 for s in mpos)
+            key = (cnt, -span, rare_w)
+            if best is None or key > best:
+                best = key
+        if best:
+            lex[(prod, page)] = (best[0], -best[1], best[2])
+
+    if not lex:
+        return _promote_changes(rows, query)
+
+    # --- векторный слой (если доступен), с таймаутом как у DocsSource ---
+    # Один unfiltered vector_main по всему docs-индексу: позиция страницы среди
+    # changelog-корпуса выводится из её глобального ранга (страницы прямо
+    # нерелевантного продукта отсекаются same_line). Продуктовый фильтр через
+    # vector_main с продуктом содержит '-' и тихо возвращает пусто (Typesense
+    # не парсит unquoted filter_by) — поэтому фильтруем по рангу, а не по RPC.
+    vec_rank = {}
+    try:
+        import threading
+        from search import vector_main
+        holder = [[]]
+
+        def _run():
+            try:
+                holder[0] = vector_main(topic_str, None, limit=25)[0]
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=4.0)
+        for i, hit in enumerate(holder[0]):
+            if len(hit) >= 2 and hit[1]:
+                vec_rank[(hit[0] or "", hit[1])] = i
+    except Exception:
+        pass
+
+    # --- композитная сортировка ---
+    scored = []
+    for (prod, page), (cnt, span, rare_w) in lex.items():
+        same_line = 0 if (base_product and prod.partition("-")[0] == base_product) else 1
+        vpos = vec_rank.get((prod, page), 10 ** 9)
+        scored.append((same_line, vpos, cnt, span, rare_w, prod, page))
+    scored.sort(key=lambda x: (x[0], x[1], -x[2], x[3], -x[4]))
+
+    picked = []
+    keep = set()
+    base_by_key = {(r.get("product"), r.get("page")): r for r in rows}
+    for it in scored[:_CHANGELOG_RANK_TOP]:
+        prod, page = it[5], it[6]
+        key = (prod, page)
+        entry = base_by_key.get(key)
+        if entry is None:
+            try:
+                entry = _get_docs_source().get_by_path(f"{prod}__{page}")
+            except Exception:
+                entry = None
+        if entry:
+            picked.append(entry)
+            keep.add(key)
+    if not picked:
+        return _promote_changes(rows, query)
+
+    others = [r for r in rows if (r.get("product"), r.get("page")) not in keep]
+    return picked + others
 
 
 # Сколько docs-страниц берём из гибридного поиска в общий пул. RRF считает по
@@ -674,35 +1127,47 @@ _CROSS_TOPIC_OTHER = {
 #                       интегрированный — Сбербанк / не интегрированный),
 #                       «Утилита для работы с POS-терминалом».
 _TOPIC_FOLLOWUP_BLOCKS = {
-    "parts_resource": {
-        "markers": ("оплат", "платеж", "касс", "онлайн", "сайт"),
-        "pages": [
-            "priem_onlajn_platezhej.htm.md",
-            "nastrojka_sposobov_oplaty.htm.md",
-            "pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md",
-        ],
-    },
-    "parts_intellect": {
-        "markers": ("печать чек", "печати чек", "печатать чек",
-                    "ккт", "терминал", "эквайринг", "онлайн-касс"),
-        "pages": [
-            "nastrojka_podklyucheniya_kkt.htm.md",
-            "nastrojka_podklyucheniya_ehkvajringa.htm.md",
-            "utilita_dlya_raboty_s_pos_terminalom.htm.md",
-        ],
-    },
+    "parts_resource": [
+        {
+            "markers": ("оплат", "платеж", "касс", "онлайн", "сайт"),
+            "pages": [
+                "priem_onlajn_platezhej.htm.md",
+                "nastrojka_sposobov_oplaty.htm.md",
+                "pechat_cheka_avansa_pri_oplate_v_onlajn.htm.md",
+            ],
+        },
+        {
+            "markers": ("маркировк", "маркированн", "честный знак"),
+            "pages": [
+                "rabota_s_markirovkoj.htm.md",
+                "nastrojka_markirovannoj_produktsii.htm.md",
+            ],
+        },
+    ],
+    "parts_intellect": [
+        {
+            "markers": ("печать чек", "печати чек", "печатать чек",
+                        "ккт", "терминал", "эквайринг", "онлайн-касс"),
+            "pages": [
+                "nastrojka_podklyucheniya_kkt.htm.md",
+                "nastrojka_podklyucheniya_ehkvajringa.htm.md",
+                "utilita_dlya_raboty_s_pos_terminalom.htm.md",
+            ],
+        },
+    ],
 }
 
 
 def _topic_followup_pages(query, canonical):
     """Страницы-подблоки для карточки canonical, релевантные теме запроса."""
-    cfg = _TOPIC_FOLLOWUP_BLOCKS.get(canonical)
-    if not cfg:
+    topics = _TOPIC_FOLLOWUP_BLOCKS.get(canonical)
+    if not topics:
         return ()
     q = query.lower()
-    if not any(m in q for m in cfg["markers"]):
-        return ()
-    return cfg["pages"]
+    for topic in topics:
+        if any(m in q for m in topic["markers"]):
+            return topic["pages"]
+    return ()
 
 
 def _cross_topic_other(query):
@@ -959,6 +1424,94 @@ def _docs_fts_related(query, product, exclude=(), limit=8):
         return []
 
 
+# ---------------------------------------------------------------------------
+# Выбор первичного блока ответа
+# ---------------------------------------------------------------------------
+
+_STOP_CHARS_RE = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _query_significant_stems(query, product=None):
+    """Значимые стемы запроса: без стоп-слов и имён продуктов.
+
+    Нужны для проверки, действительно ли кандидат в primary-block отвечает
+    на запрос (документация иногда отдаёт мусорную страницу, где совпал
+    только общий токен «загрузка», а тема запроса — сертификаты/маркировка).
+    """
+    try:
+        from search import normalize_terms, terms
+        stems = normalize_terms(terms(query))
+    except Exception:
+        stems = []
+    drop = set()
+    for prod, names in _SOL_PRODUCT_NAME_STEMS.items():
+        drop |= names
+    droppable = ((product or "").replace("-", "_"),)
+    out = []
+    for s in stems:
+        if s in drop or s in droppable:
+            continue
+        out.append(s)
+    return list(dict.fromkeys(out))
+
+
+def _rare_stems(stems):
+    """«Редкие» (специфичные) стемы запроса: небольшой df в индексе.
+
+    Общие токены («загрузка» df≈240, «сделать» df≈60) есть во многих
+    страницах и не различают тему; редкие («сертификат» df=2, «ПИоТ» df=4)
+    именно её и задают. По ним и решаем, отвечает ли doc на запрос.
+    """
+    try:
+        from search import _term_doc_frequency as _df
+    except Exception:
+        return stems
+    out = []
+    for s in stems:
+        try:
+            if 0 < _df(s) <= 20:
+                out.append(s)
+        except Exception:
+            continue
+    return out
+
+
+def _block_covers_stems(block, stems):
+    """Сколько значимых стемов запроса покрывает блок (0..len(stems)).
+
+    Документация иногда отдаёт страницу, где совпал только общий токен
+    («загрузка»), а тема запроса (сертификаты/маркировка) в тексте отсутствует.
+    Решение, покрывающее больше значимых стемов, релевантнее такого doc.
+    """
+    if not stems:
+        return 0
+    text = (block.get("title") or "").lower()
+    text += " " + ((block.get("content_full") or block.get("content") or "")).lower()
+    n = 0
+    for s in stems:
+        if re.search(r"(?<![a-zа-яё0-9])" + re.escape(s) + r"[a-zа-яё]*", text):
+            n += 1
+    return n
+
+
+_PAYMENT_TOPIC_HINTS = ("касс", "оплат", "чек", "онлайн", "эквайринг")
+
+
+def _is_part_resource_payment_doc(block):
+    """Страница документации Parts.Resource про онлайн-оплату/кассу.
+
+    Платёжные страницы Parts.Resource («Настройка онлайн-кассы», «Онлайн-кассы»,
+    «Способы оплаты») не содержат слово «эквайринг» (оно из Parts.Intellect), из-за
+    чего правило rare-подмены doc→solution считало их «мусором» и заголовок ответа
+    уезжал к карточке решения по банку-эквайеру. Такие страницы — прямой
+    документированный ответ на платёжный запрос в Parts.Resource, их не вытесняем.
+    """
+    if (block.get("product") or "") != "parts-resource-guide":
+        return False
+    text = ((block.get("title") or "") + " " + ((block.get("content_full") or block.get("content") or ""))).lower()
+    return any(h in text for h in _PAYMENT_TOPIC_HINTS)
+
+
 def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
     """Собирает 1-2 структурированных ответа из результатов.
 
@@ -1033,12 +1586,30 @@ def compose_answers(results, intent, max_answers=2, cross_links=None, query=""):
         # Первичный блок (заголовок): лучшая doc-страница группы по скору
         # (общие инструкции документации — в приоритете над решениями/CRM).
         # Ответ = ОДИН блок с полной информацией по запросу в рамках продукта.
+        sig_stems = _query_significant_stems(query, prod)
         primary_block = None
         for src in ("docs", "solution", "crm"):
             lst = _best(pools[src], None)
-            if lst:
-                primary_block = lst[0]
-                break
+            if not lst:
+                continue
+            # Документация-«мусор» (совпал только общий токен вроде «загрузка»,
+            # а темы запроса в странице нет) не должна закрывать релевантное
+            # решение. Меняем doc на решение только когда в запросе есть
+            # «редкий» специфичный стем (сертификат/ПИоТ/SSL), который
+            # решение покрывает, а doc — нет, И doc-страница слабая
+            # (отрицательный гибридный скор — «мусор», а не релевантный ответ).
+            if src == "docs":
+                doc_raw = lst[0].get("raw_score", 0)
+                rare = _rare_stems(sig_stems)
+                sol = _best(pools["solution"], None)
+                if rare and doc_raw < 0 and sol and not _is_part_resource_payment_doc(lst[0]):
+                    sol_rare = _block_covers_stems(sol[0], rare)
+                    doc_rare = _block_covers_stems(lst[0], rare)
+                    if sol_rare >= len(rare) > doc_rare:
+                        primary_block = sol[0]
+                        break
+            primary_block = lst[0]
+            break
 
         # Если по теме запроса известна «основная» страница продукта — ставим её
         # первичным блоком (дополнения группы уходят в related).
@@ -1282,14 +1853,34 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             # (флаг для группировки в compose), а не фильтром.
             # Запрашиваем больше docs, чтобы в результат попадали страницы
             # разных продуктов (Parts.Intellect, Parts.Resource, Sync...)
+            asks_changes = _asks_for_changes(query)
             rows = ds.search(query, None, limit=max(limit_per_source, DOCS_MERGE_TOP))
-            if _asks_for_changes(query):
+            if asks_changes:
+                # Для вопросов про изменения/версии добавляем changelog-страницы,
+                # которые могли выпасть из пула из-за автодетекта продукта:
+                #   «Parts.Intellect» → parts-intellect-guide → changelog исключён.
+                # Подмешиваем changelog-продукт (-changes) отдельным поиском.
+                try:
+                    from search import detect_product_name as _dpn
+                    detected = _dpn(query)
+                except Exception:
+                    detected = None
+                if detected and detected.endswith("-guide"):
+                    changes_product = detected[:-len("-guide")] + "-changes"
+                    try:
+                        add = ds.search(query, changes_product, limit=20)
+                        seen = {(r.get("product"), r.get("page")) for r in rows}
+                        for r in add:
+                            if (r.get("product"), r.get("page")) not in seen:
+                                rows.append(r)
+                    except Exception as e:
+                        print(f"[docs] changelog-дополнение: {e}", file=sys.stderr)
                 # Для вопросов «когда/в какой версии реализовано» changelog —
                 # это и есть прямой ответ, а не справочная страница. Ставим
                 # перечисленные версии в топ пула, чтобы они не отставали от
                 # guide-страниц по позиционному скору merge_results.
                 if _changes_are_answer(query):
-                    rows = _promote_changes(rows)
+                    rows = _rank_changelog(rows, query)
                 return rows
             # Подавляем changelog-шум: страницы *-changes попадают в топ для
             # обычных запросов («как направить seo» → «Версия 6.64»).
@@ -1297,8 +1888,9 @@ def _cross_search_impl(query, max_answers, limit_per_source):
             # сдвигает позиционные скоры и ломает порядок групп (например, у
             # «печать чеков» Sync обгонял Parts.Resource в top-2). Отсеиваем их
             # при компоновке блоков (см. compose_answers), сохраняя ранги.
-            rows = [r for r in rows
-                    if not ("-changes" in (r.get("product") or ""))]
+            filtered = [r for r in rows
+                        if not ("-changes" in (r.get("product") or ""))]
+            rows = filtered or rows
 
             # Тематическая экспансия: детектированный feature-продукт не сужает
             # тему — страницы «график поставок»/«печать чеков» есть и в

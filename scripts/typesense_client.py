@@ -173,7 +173,7 @@ def vector_search(query_vector: list[float], k: int = 20,
         }]
     }
     if product:
-        body["searches"][0]["filter_by"] = f"product:={product}"
+        body["searches"][0]["filter_by"] = f"product:='{product}'"
 
     result = _request("POST", "/multi_search", body=body)
     hits = result.get("results", [{}])[0].get("hits", [])

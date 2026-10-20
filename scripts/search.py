@@ -81,6 +81,21 @@ PRODUCT_NAMES_SYSTEM = [
      "diadok"),
     (("parts resource rest api", "resource rest api", "rest api ресурс"),
      "parts-resource-rest-api"),
+    # Перенос/выгрузка данных между системами — это и есть тема Синхронизатора
+    # («выгрузить аналоги из Parts.Intellect в Parts.Resource»,
+    #  «передача прайсов между Parts.Intellect и Parts.Resource»), хотя само
+    # слово «синхронизатор» в запросе может отсутствовать. Должно срабатывать
+    # раньше одиночных имён parts-intellect-guide/parts-resource-guide.
+    (("parts intellect в parts resource", "parts resource в parts intellect",
+      "parts intellect и parts resource", "parts resource и parts intellect",
+      "parts intellect с parts resource", "parts resource с parts intellect",
+      "parts intellect parts resource", "parts resource parts intellect",
+      "между parts intellect и parts resource",
+      "из parts intellect в parts resource", "из parts resource в parts intellect",
+      "интеллект в ресурс", "ресурс в интеллект",
+      "интеллект и ресурс", "ресурс и интеллект",
+      "интеллект с ресурсом", "ресурс с интеллектом"),
+     "parts-intellect-synch"),
     (("parts intellect sinc", "parts intellect sync", "интеллект синхронизатор",
       "синхронизатор"),
      "parts-intellect-synch"),
@@ -305,7 +320,8 @@ def fts_query(terms, mode="AND"):
 
 
 STOPWORDS = frozenset(
-    "в на для и по из от с со к у о а не то что как при но чем чём же бы без до".split()
+    "в на для и по из от с со к у о а не то что как при но чем чём же бы без до"
+    " их они его её ее ему ей им ними меня тебя мне тебе нас вас".split()
 )
 PROXIMITY_WINDOW = 120
 TOKEN_RE = re.compile(r"[\wа-яё]+", re.I)
@@ -331,6 +347,21 @@ def normalize_terms(terms):
                     if sub not in STOPWORDS:
                         out.append(sub)
                 continue
+            # Точечные буквенные токены («Parts.Resource», «Parts.Intellect») в
+            # стем-индексе тоже разбиты на отдельные слова (parts, resource), а
+            # строгий AND по «parts.resource» не находит страницу — нет такого
+            # токена-префикса. Разбиваем на составляющие так же, как версии.
+            if len(part) >= 2:
+                segs = [s for s in part.split(".") if s]
+                if len(segs) > 1:
+                    for seg in segs:
+                        seg = seg.strip().lower()
+                        if seg in STOPWORDS or len(seg) < 2:
+                            continue
+                        st = stem_word(seg)
+                        if st and st not in out:
+                            out.append(st)
+                    continue
             if part in STOPWORDS or len(part) < 2:
                 continue
             s = stem_word(part)
@@ -1266,6 +1297,21 @@ def search_hybrid(query, product=None, limit=5, snippets=True, embed_host=None,
                 rows = ([rows[0]] + sec
                         + [r for r in rows[1:] if (r[0], r[1]) not in seen])
                 rows = rows[:limit]
+    # Запрос явно называет Parts.Resource и платёжный («эквайринг в Parts.Resource»):
+    # страницы онлайн-оплаты продукта — прямой ответ, ставим их в топ вместо
+    # слабого узкого пула («Настройки»/«Настройка системы»), не давая wide-fallback
+    # вытащить Синхронизатор.
+    elif (detected_product == "parts-resource-guide"
+            and product == "parts-resource-guide"
+            and rows and not web_payment):
+        pr_rows = payment_resource_rows(query, limit=5)
+        if pr_rows:
+            seen = {(r[0], r[1]) for r in rows}
+            sec = [r for r in pr_rows if (r[0], r[1]) not in seen]
+            if sec:
+                rest = [r for r in rows if (r[0], r[1]) not in seen]
+                dedup_docs = list(dict.fromkeys(sec))
+                rows = (dedup_docs + [r for r in rest if (r[0], r[1]) not in seen])[:limit]
 
     # Fallback по раскладке: только когда результат слабый (пустой или шумный).
     if product is None and rows:

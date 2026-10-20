@@ -17,6 +17,23 @@ from search import (  # noqa: E402
 )
 import rank_model  # noqa: E402
 
+# --- Аббревиатуры для редких-фильтров в fuse() ------------------------------
+# Ставится ТОЛЬКО здесь, не в search._page_has_terms: иначе _discriminators
+# считает страницы-аналоги как дискриминаторные и rare-фильтр отключается.
+STEM_ALIASES = {"бд": ("база",)}
+
+
+def _page_has_fuse(product, page, stems):
+    """_page_has_terms + аббревиатуры для rare-фильтра и vector-boost."""
+    if not stems:
+        return False
+    expanded = set()
+    for t in stems:
+        expanded.add(t)
+        expanded.update(STEM_ALIASES.get(t, ()))
+    return _page_has_terms(product, page, sorted(expanded))
+
+
 API_PRODUCTS = {"service-api", "parts-resource-rest-api"}
 # REST-справочники, которые подавляем для не-API запросов (parts-index-rest-api —
 # общий индекс методов, тоже тянется к гайд-запросам: «заказ поставщику», «НДС»).
@@ -80,7 +97,9 @@ ROUTING_RULES = [
     (("установ", "сервер"),
      "parts-intellect-guide", "ustanovka_servera.htm.md"),
     # («как подключить поставщика в Parts.Resource» — общая подключение vs веб)
-    (("parts.resource",),
+    # Требуем «подключ»: без него срабатывал на ВСЕ запросы с «в Parts.Resource»
+    # (например «работа с маркированным товаром в Parts.Resource»).
+    (("parts.resource", "подключ"),
      "parts-resource-guide", "podklyucheniya_postavshchika.htm.md"),
     # («заказ поставщику создать» — мастер создания заказа vs отправка)
     (("заказ", "поставщик", "созд"),
@@ -261,7 +280,7 @@ def fuse(query, fts_rows, vec_hits, product=None):
         k = (_vk(h, "product"), _vk(h, "page"))
         eff = i
         if boost:
-            eff = max(0, i - boost) if _page_has_terms(k[0], k[1], rare) \
+            eff = max(0, i - boost) if _page_has_fuse(k[0], k[1], rare) \
                 else i + boost
         vec_w = VEC_API_WEIGHT if "api" in norm else 1.0
         vec_rrf = vec_w / (RRF_K + eff + 1)
@@ -339,7 +358,7 @@ def fuse(query, fts_rows, vec_hits, product=None):
     # показываем только страницы, содержащие хотя бы один из них.
     if rare:
         merged = [kv for kv in merged
-                  if _page_has_terms(kv[0][0], kv[0][1], rare)]
+                  if _page_has_fuse(kv[0][0], kv[0][1], rare)]
         if len(merged) < 2:
             merged = sorted(rrf.items(), key=keyfn)
 
